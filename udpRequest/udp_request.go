@@ -25,6 +25,20 @@ var (
 	retries = [...]int{timeoutDiv, 2 * timeoutDiv, 3 * timeoutDiv}
 )
 
+// A Handler processes incoming UDP requests.
+//
+// HandleUDPRequest will be called in it's own go routine to prevent a single request from blocking
+// all other incoming requests. The buffer should be safe to manipulate if needed.
+type Handler interface {
+	HandleUDPRequest(*PeerRequest, []byte)
+}
+
+// HandlerFunc is an adapter to allow the use of oridnary functions as UDP handlers.
+type HandlerFunc func(*PeerRequest, []byte)
+
+// HandleUDPRequest call h
+func (f HandlerFunc) HandleUDPRequest(p *PeerRequest, b []byte) { f(p, b) }
+
 // Config contains all of the options available for a UDP instance
 type Config struct {
 	// Allows for custom socket types or instances to be used. If nil a new UDPConn is created
@@ -32,8 +46,14 @@ type Config struct {
 	Socket net.PacketConn
 	Port   int
 
+	// Timeout and Retry control how to behave while waiting for a response to sent requests.
+	// If Retry is true the time before the first retry is the Timeout duration and the time
+	// between subsequent retries will increase, so it will take much longer than Timeout before
+	// the Request will return with a timeout error.
 	Timeout time.Duration
 	Retry   bool
+
+	Handler Handler
 }
 
 // PeerRequest contains all of the information needed to uniquely reference a request.
@@ -66,6 +86,8 @@ type UDPRequest struct {
 	lock    sync.RWMutex
 	pending map[int]*pendingRequest
 	retry   bool
+
+	Handler Handler
 }
 
 // Addr returns the local address that the PacketConn is attached to.
@@ -132,7 +154,7 @@ func (u *UDPRequest) readMessages() {
 	buf := make([]byte, 1<<16)
 	errCnt := 0
 	for {
-		n, _, err := u.socket.ReadFrom(buf)
+		n, addr, err := u.socket.ReadFrom(buf)
 		if err != nil {
 			if strings.Contains(err.Error(), "use of closed") {
 				return
@@ -149,7 +171,11 @@ func (u *UDPRequest) readMessages() {
 		}
 		header := int(buf[0])<<8 | int(buf[1])
 		if header&requestMarker != 0 {
-			// TODO: handle incoming requests
+			if u.Handler != nil {
+				cp := make([]byte, n-2)
+				copy(cp, buf[2:])
+				go u.Handler.HandleUDPRequest(&PeerRequest{addr, header & maxTick}, cp)
+			}
 		} else {
 			u.lock.RLock()
 			if p := u.pending[header]; p != nil {
@@ -165,10 +191,6 @@ func (u *UDPRequest) readMessages() {
 // Request wraps the provided request data in a request frame and sends it to the specified peer
 // address. It then waits for a response from the peer and returns its data.
 func (u *UDPRequest) Request(ctx context.Context, peer net.Addr, req []byte) ([]byte, error) {
-	if u.socket == nil {
-		return nil, errors.New("use of closed network socket")
-	}
-
 	id := u.tick
 	if u.tick++; u.tick > maxTick {
 		u.tick = 0
@@ -208,7 +230,7 @@ func (u *UDPRequest) Respond(peer *PeerRequest, res []byte) error {
 	buf[1] = byte((peer.ID & 0x00ff) >> 0)
 	copy(buf[2:], res)
 
-	_, err := u.socket.WriteTo(res, peer.Addr)
+	_, err := u.socket.WriteTo(buf, peer.Addr)
 	return errors.WithMessage(err, "sending response")
 }
 
@@ -245,6 +267,7 @@ func New(c *Config) (*UDPRequest, error) {
 		result.socket = sock
 	}
 
+	result.Handler = c.Handler
 	result.tick = rand.Intn(maxTick)
 	result.pending = make(map[int]*pendingRequest, 4)
 	result.retry = c.Retry
