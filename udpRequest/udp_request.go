@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -41,8 +42,8 @@ func (f HandlerFunc) HandleUDPRequest(p *PeerRequest, b []byte) { f(p, b) }
 
 // Config contains all of the options available for a UDP instance
 type Config struct {
-	// Allows for custom socket types or instances to be used. If nil a new UDPConn is created
-	// that will listen on the specified port.
+	// Allows for custom socket types or instances to be used. If Socket is nil a new net.UDPConn
+	// is created that will listen on the specified port.
 	Socket net.PacketConn
 	Port   int
 
@@ -81,7 +82,7 @@ func (e timeoutErr) Temporary() bool { return true }
 // opened packet connection.
 type UDPRequest struct {
 	socket net.PacketConn
-	tick   int
+	tick   uint32
 
 	lock    sync.RWMutex
 	pending map[int]*pendingRequest
@@ -191,12 +192,9 @@ func (u *UDPRequest) readMessages() {
 // Request wraps the provided request data in a request frame and sends it to the specified peer
 // address. It then waits for a response from the peer and returns its data.
 func (u *UDPRequest) Request(ctx context.Context, peer net.Addr, req []byte) ([]byte, error) {
-	id := u.tick
-	if u.tick++; u.tick > maxTick {
-		u.tick = 0
-	}
-
+	id := int(atomic.AddUint32(&u.tick, 1) % (maxTick + 1))
 	header := id | requestMarker
+
 	buf := make([]byte, len(req)+2)
 	buf[0] = byte((header & 0xff00) >> 8)
 	buf[1] = byte((header & 0x00ff) >> 0)
@@ -268,7 +266,7 @@ func New(c *Config) (*UDPRequest, error) {
 	}
 
 	result.Handler = c.Handler
-	result.tick = rand.Intn(maxTick)
+	result.tick = uint32(rand.Intn(maxTick))
 	result.pending = make(map[int]*pendingRequest, 4)
 	result.retry = c.Retry
 	go result.checkTimeouts(c.Timeout)
