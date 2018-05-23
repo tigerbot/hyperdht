@@ -60,7 +60,7 @@ type Config struct {
 // PeerRequest contains all of the information needed to uniquely reference a request.
 type PeerRequest struct {
 	net.Addr
-	ID int
+	id int
 }
 
 type pendingRequest struct {
@@ -172,10 +172,10 @@ func (u *UDPRequest) readMessages() {
 		}
 		header := int(buf[0])<<8 | int(buf[1])
 		if header&requestMarker != 0 {
-			if u.Handler != nil {
+			if h := u.Handler; h != nil {
 				cp := make([]byte, n-2)
 				copy(cp, buf[2:])
-				go u.Handler.HandleUDPRequest(&PeerRequest{addr, header & maxTick}, cp)
+				go h.HandleUDPRequest(&PeerRequest{addr, header & maxTick}, cp)
 			}
 		} else {
 			u.lock.RLock()
@@ -221,15 +221,29 @@ func (u *UDPRequest) Request(ctx context.Context, peer net.Addr, req []byte) ([]
 	}
 }
 
+func (u *UDPRequest) sendMessage(header int, msg []byte, addr net.Addr) error {
+	buf := make([]byte, len(msg)+2)
+	buf[0] = byte((header & 0xff00) >> 8)
+	buf[1] = byte((header & 0x00ff) >> 0)
+	copy(buf[2:], msg)
+
+	_, err := u.socket.WriteTo(buf, addr)
+	return errors.WithMessage(err, "sending packet")
+}
+
 // Respond sends the provided response data to the peer whose request is referenced by the peer data.
 func (u *UDPRequest) Respond(peer *PeerRequest, res []byte) error {
-	buf := make([]byte, len(res)+2)
-	buf[0] = byte((peer.ID & 0xff00) >> 8)
-	buf[1] = byte((peer.ID & 0x00ff) >> 0)
-	copy(buf[2:], res)
+	return u.sendMessage(peer.id, res, peer.Addr)
+}
 
-	_, err := u.socket.WriteTo(buf, peer.Addr)
-	return errors.WithMessage(err, "sending response")
+// ForwardRequest sends a request to a peer using the request ID of a request from a different peer.
+func (u *UDPRequest) ForwardRequest(from *PeerRequest, to net.Addr, msg []byte) error {
+	return u.sendMessage(from.id|requestMarker, msg, to)
+}
+
+// ForwardResponse sends a response to a peer using the response ID of a response from a different peer.
+func (u *UDPRequest) ForwardResponse(from *PeerRequest, to net.Addr, msg []byte) error {
+	return u.sendMessage(from.id, msg, to)
 }
 
 // Close shuts down the socket and cancels any pending requests. The underlying socket is closed

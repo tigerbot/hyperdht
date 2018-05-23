@@ -2,6 +2,7 @@ package udpRequest
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,9 +18,17 @@ type Echoer struct {
 func (e *Echoer) HandleUDPRequest(p *PeerRequest, b []byte) {
 	if left := atomic.AddInt32(&e.reject, -1); left >= 0 {
 		atomic.AddInt32(&e.rejected, 1)
-	} else {
-		e.sock.Respond(p, b)
+	} else if err := e.sock.Respond(p, b); err != nil {
+		fmt.Println(err)
 	}
+}
+
+func mustCreate(c *Config) *UDPRequest {
+	sock, err := New(c)
+	if err != nil {
+		panic(err)
+	}
+	return sock
 }
 
 func testEcho(t *testing.T, sock *UDPRequest, message string, wait *sync.WaitGroup) {
@@ -51,10 +60,7 @@ func checkTimeoutErr(t *testing.T, sock *UDPRequest) {
 }
 
 func TestRequest(t *testing.T) {
-	sock, err := New(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sock := mustCreate(nil)
 	defer sock.Close()
 	sock.Handler = &Echoer{sock: sock}
 
@@ -62,10 +68,7 @@ func TestRequest(t *testing.T) {
 }
 
 func TestMultipleRequests(t *testing.T) {
-	sock, err := New(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sock := mustCreate(nil)
 	defer sock.Close()
 	sock.Handler = &Echoer{sock: sock}
 
@@ -91,10 +94,7 @@ func TestMultipleRequests(t *testing.T) {
 func TestCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	sock, err := New(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sock := mustCreate(nil)
 	defer sock.Close()
 
 	time.AfterFunc(time.Millisecond, cancel)
@@ -108,20 +108,14 @@ func TestCancel(t *testing.T) {
 }
 
 func TestTimeout(t *testing.T) {
-	sock, err := New(&Config{Timeout: 5 * time.Millisecond})
-	if err != nil {
-		t.Fatal(err)
-	}
+	sock := mustCreate(&Config{Timeout: 5 * time.Millisecond})
 	defer sock.Close()
 
 	checkTimeoutErr(t, sock)
 }
 
 func TestRetry(t *testing.T) {
-	sock, err := New(&Config{Timeout: 5 * time.Millisecond, Retry: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	sock := mustCreate(&Config{Timeout: 5 * time.Millisecond, Retry: true})
 	defer sock.Close()
 	echo := &Echoer{sock: sock, reject: 2}
 	sock.Handler = echo
@@ -132,11 +126,52 @@ func TestRetry(t *testing.T) {
 	}
 }
 
-func TestCleanup(t *testing.T) {
-	sock, err := New(nil)
-	if err != nil {
-		t.Fatal(err)
+func TestForward(t *testing.T) {
+	// Even though everything in this test happens in a deterministic non-racey order, the
+	// nature of the go routines involved makes it so the race detector can't know that. As
+	// such we need to utilize a lock in the handlers and assign the handlers through the config.
+	var lock sync.Mutex
+	lock.Lock()
+	var origin, middle, remote *UDPRequest
+
+	// The layer that can actually handle requests to forward to a particular peer is a layer above
+	// us, so we have the "to" value hard coded to what the test needs to pass.
+	midHandler := HandlerFunc(func(p *PeerRequest, msg []byte) {
+		lock.Lock()
+		if err := middle.ForwardRequest(p, remote.Addr(), msg); err != nil {
+			t.Errorf("middle failed to forward to remote: %v", err)
+		}
+		lock.Unlock()
+	})
+	remHandler := HandlerFunc(func(p *PeerRequest, msg []byte) {
+		lock.Lock()
+		if err := remote.ForwardResponse(p, origin.Addr(), msg); err != nil {
+			t.Errorf("remote failed to forward to origin: %v", err)
+		}
+		lock.Unlock()
+	})
+
+	origin = mustCreate(nil)
+	defer origin.Close()
+	middle = mustCreate(&Config{Handler: midHandler})
+	defer middle.Close()
+	remote = mustCreate(&Config{Handler: remHandler})
+	defer remote.Close()
+	lock.Unlock()
+
+	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	defer done()
+
+	const message = "this will go through the middle socket"
+	if resp, err := origin.Request(ctx, middle.Addr(), []byte(message)); err != nil {
+		t.Error(err)
+	} else if string(resp) != message {
+		t.Errorf("got %q, expected %q", resp, message)
 	}
+}
+
+func TestCleanup(t *testing.T) {
+	sock := mustCreate(nil)
 
 	time.AfterFunc(5*time.Millisecond, func() { sock.Close() })
 	checkTimeoutErr(t, sock)
