@@ -4,6 +4,7 @@ package kbucket
 
 import (
 	"crypto/rand"
+	"sort"
 	"sync"
 )
 
@@ -66,6 +67,55 @@ func (b *KBucket) Remove(id []byte) Contact {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 	return findNode(b.root, id).removeContact(id)
+}
+
+// Count returns the total number of contacts in the K-Bucket.
+func (b *KBucket) Count() int {
+	b.lock.RLock()
+	defer b.lock.RUnlock()
+	var result int
+
+	nodes := []*bucketNode{b.root}
+	for i := 0; i < len(nodes); i++ {
+		if node := nodes[i]; node.contacts == nil {
+			nodes = append(nodes, node.left, node.right)
+		} else {
+			result += len(node.contacts)
+		}
+	}
+
+	return result
+}
+
+// Contacts creates and returns a slice of all Contacts stored in the K-Bucket. The order
+// will tend to be from farther to closer relative to the local ID, but might not be exact.
+func (b *KBucket) Contacts() []Contact {
+	b.lock.RLock()
+	defer b.lock.RUnlock()
+	var result []Contact
+
+	nodes := []*bucketNode{b.root}
+	for i := 0; i < len(nodes); i++ {
+		if node := nodes[i]; node.contacts == nil {
+			nodes = append(nodes, node.left, node.right)
+		} else {
+			result = append(result, node.contacts...)
+		}
+	}
+
+	return result
+}
+
+// Closest gets the `cnt` closest contacts based on the definition of "closest" provided by the
+// distance comparer provided. The default XOR-based distance is implemented by XORDistance.
+func (b *KBucket) Closest(cmp DistanceCmp, cnt int) []Contact {
+	list := b.Contacts()
+	sort.Sort(distSorter{list: list, cmp: cmp})
+
+	if cnt < 0 || len(list) <= cnt {
+		return list
+	}
+	return list[:cnt]
 }
 
 // New creates a new KBucket instance
