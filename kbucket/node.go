@@ -52,6 +52,11 @@ func (n *bucketNode) removeContact(id []byte) Contact {
 
 	return nil
 }
+func (n *bucketNode) removeIndex(i int) Contact {
+	c := n.contacts[i]
+	n.contacts = append(n.contacts[:i], n.contacts[i+1:]...)
+	return c
+}
 
 func createNode(bitIndex int) *bucketNode {
 	return &bucketNode{contacts: []Contact{}, bitIndex: bitIndex}

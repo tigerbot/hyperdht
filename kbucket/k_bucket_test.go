@@ -3,7 +3,6 @@ package kbucket
 import (
 	"bytes"
 	"reflect"
-	"sync"
 	"testing"
 )
 
@@ -182,32 +181,6 @@ func TestCount(t *testing.T) {
 	if cnt := bucket.Count(); cnt != 6 {
 		t.Fatalf("bucket after multi-add has count %d, exptected 1", cnt)
 	}
-}
-
-func TestPing(t *testing.T) {
-	bucket := New(&Config{LocalID: []byte{0, 0}})
-
-	var wait sync.Mutex
-	bucket.OnPing(func(current []Contact, replacement Contact) {
-		if len(current) != DefaultPingCount {
-			t.Errorf("got %d nodes to ping, expected %d", len(current), DefaultPingCount)
-		}
-		for i := range current {
-			if expect := bucket.root.right.contacts[i]; current[i] != expect {
-				t.Errorf("contact %d doesn't match: got %#v, expected %#v", i, current[i], expect)
-			}
-		}
-		if r := replacement.ID(); r[0] != 0x80 || r[1] != DefaultBucketSize {
-			t.Errorf("wrong replacement contact ID: got %04x, expected 80%02x", r, DefaultBucketSize)
-		}
-		wait.Unlock()
-	})
-
-	wait.Lock()
-	for i := byte(0); i <= DefaultBucketSize; i++ {
-		bucket.Add(&testContact{0x80, i}) // make sure they all go into "far away" node
-	}
-	wait.Lock()
 }
 
 func TestLargeBucket(t *testing.T) {

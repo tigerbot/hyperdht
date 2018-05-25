@@ -22,6 +22,11 @@ type (
 
 	// FuncArbiter resolves conflicts when two contacts with identical IDs are added.
 	FuncArbiter func(incumbent, candidate Contact) Contact
+
+	// FuncAddRemove is the signature for event handlers when contacts are added or removed
+	FuncAddRemove func(c Contact)
+	// FuncUpdate is the signature for event handlers when contacts are updated
+	FuncUpdate func(incumbent, replacement Contact)
 )
 
 // The Config struct contains all of the configurable parameters of the KBucket.
@@ -32,6 +37,10 @@ type Config struct {
 
 	OnPing  FuncPing
 	Arbiter FuncArbiter
+
+	OnAdd    FuncAddRemove
+	OnRemove FuncAddRemove
+	OnUpdate FuncUpdate
 }
 
 // The KBucket struct implements a Kademlia DHT K-Bucket as a binary tree.
@@ -45,6 +54,10 @@ type KBucket struct {
 
 	onPing  FuncPing
 	arbiter FuncArbiter
+
+	onAdd    FuncAddRemove
+	onRemove FuncAddRemove
+	onUpdate FuncUpdate
 }
 
 // Arbiter sets the arbitration function. If nil is provided it will use the default function.
@@ -66,23 +79,50 @@ func (b *KBucket) OnPing(f FuncPing) {
 	b.lock.Unlock()
 }
 
+// OnAdd sets the ping handler. Only one function may the handler at a time. To ignore add
+// events a nil value may be used.
+func (b *KBucket) OnAdd(f FuncAddRemove) {
+	b.lock.Lock()
+	b.onAdd = f
+	b.lock.Unlock()
+}
+
+// OnRemove sets the ping handler. Only one function may the handler at a time. To ignore remove
+// events a nil value may be used.
+func (b *KBucket) OnRemove(f FuncAddRemove) {
+	b.lock.Lock()
+	b.onRemove = f
+	b.lock.Unlock()
+}
+
+// OnUpdate sets the ping handler. Only one function may the handler at a time. To ignore update
+// events a nil value may be used.
+func (b *KBucket) OnUpdate(f FuncUpdate) {
+	b.lock.Lock()
+	b.onUpdate = f
+	b.lock.Unlock()
+}
+
 // add is the private version of the Add method, but because it is recursive we split it
 // into a separate function to make the locking mechanism easier.
 func (b *KBucket) add(c Contact) {
-	node := findNode(b.root, c.ID())
+	id := c.ID()
+	node := findNode(b.root, id)
 
-	if ind := node.indexOf(c.ID()); ind >= 0 {
-		if incumbent := node.contacts[ind]; incumbent == c {
-			// If the reference is exactly the same (probable in the event that the onPing
-			// re-adds contacts that respond) we shouldn't need to call the arbiter, we
-			// just need to move the contact to the end of the list.
-			node.removeContact(c.ID())
-			node.addContact(c)
-		} else if selection := b.arbiter(incumbent, c); selection != incumbent {
-			// Otherwise if the arbiter returns something not the incumbent then we need to
-			// remove the incumbent and add the returned value (might not be `c` either).
-			node.removeContact(incumbent.ID())
-			node.addContact(selection)
+	if index := node.indexOf(id); index >= 0 {
+		incumbent := node.contacts[index]
+		selection := b.arbiter(incumbent, c)
+
+		// If we are to keep the incumbent and the contact we were given wasn't the incumbent
+		// needing to be bumped to to newer part of the list then we do nothing
+		if selection == incumbent && incumbent != c {
+			return
+		}
+
+		node.removeIndex(index)
+		node.addContact(selection)
+		if b.onUpdate != nil {
+			go b.onUpdate(incumbent, selection)
 		}
 		return
 	}
@@ -90,6 +130,9 @@ func (b *KBucket) add(c Contact) {
 	// If the bucket has room for new contacts all we need to do is add this one.
 	if node.size() < b.bucketsize {
 		node.addContact(c)
+		if b.onAdd != nil {
+			go b.onAdd(c)
+		}
 		return
 	}
 
@@ -131,7 +174,12 @@ func (b *KBucket) Get(id []byte) Contact {
 func (b *KBucket) Remove(id []byte) Contact {
 	b.lock.Lock()
 	defer b.lock.Unlock()
-	return findNode(b.root, id).removeContact(id)
+
+	c := findNode(b.root, id).removeContact(id)
+	if c != nil && b.onRemove != nil {
+		b.onRemove(c)
+	}
+	return c
 }
 
 // Count returns the total number of contacts in the K-Bucket.
@@ -214,6 +262,10 @@ func New(c *Config) *KBucket {
 
 		onPing:  c.OnPing,
 		arbiter: c.Arbiter,
+
+		onAdd:    c.OnAdd,
+		onRemove: c.OnRemove,
+		onUpdate: c.OnUpdate,
 	}
 	return result
 }
