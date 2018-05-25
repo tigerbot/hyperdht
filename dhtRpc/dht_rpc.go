@@ -8,11 +8,13 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 
+	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
 	"gitlab.daplie.com/core-sdk/hyperdht/udpRequest"
 )
 
@@ -21,7 +23,8 @@ const (
 
 	secretCnt      = 2
 	secretSize     = 32
-	secretLifetime = 5 * time.Second
+	secretLifetime = 5 * time.Minute
+	tickInterval   = 5 * time.Second
 )
 
 // Config contains all of the options available for a DHT instance
@@ -42,9 +45,28 @@ type DHT struct {
 	id      [IDSize]byte
 	queryID []byte
 	secrets [secretCnt][]byte
+	tick    uint64
+	nodes   *kbucket.KBucket
 
 	socket *udpRequest.UDPRequest
 	done   chan struct{}
+}
+
+func (d *DHT) updateTick() {
+	ticker := time.NewTicker(tickInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.done:
+			return
+
+		case <-ticker.C:
+			if tick := atomic.AddUint64(&d.tick, 1); tick&7 == 0 {
+				// TODO: d.pingSome()
+			}
+		}
+	}
 }
 
 func (d *DHT) makeToken(peer net.Addr) []byte {
@@ -85,6 +107,20 @@ func (d *DHT) rotateSecrets() {
 	}
 }
 
+func (d *DHT) addNode(peer net.Addr, id, token []byte) {
+	if len(id) != IDSize || bytes.Equal(d.id[:], id) {
+		return
+	}
+
+	node := new(Node)
+	copy(node.id[:], id)
+	node.addr = peer
+	node.roundTripToken = token
+	node.tick = atomic.LoadUint64(&d.tick)
+
+	d.nodes.Add(node)
+}
+
 func (d *DHT) forwardRequest(from *udpRequest.PeerRequest, req *Request) {
 	if req.GetCommand() != "_ping" {
 		return
@@ -116,6 +152,34 @@ func (d *DHT) forwardResponse(peer *udpRequest.PeerRequest, req *Request) *udpRe
 	return &cp
 }
 
+func (d *DHT) onNodePing(current []kbucket.Contact, replacement kbucket.Contact) {
+	curTick := atomic.LoadUint64(&d.tick)
+	reping := make([]*Node, 0, len(current))
+
+	for _, c := range current {
+		// The k-bucket shouldn't ever have anything but *Node, but handle it just in case
+		if node, ok := c.(*Node); !ok {
+			d.nodes.Remove(c.ID())
+			d.nodes.Add(replacement)
+			return
+		} else if curTick-node.tick >= 3 {
+			// More than 10 seconds since we pinged this node, so make sure it's still active
+			reping = append(reping, node)
+		}
+	}
+
+	ctx := context.TODO()
+	for _, n := range reping {
+		if err := d.Ping(ctx, n.addr); err != nil {
+			d.nodes.Remove(n.ID())
+			d.nodes.Add(n)
+			return
+		}
+		// We shouldn't need to update the node when the ping succeeds because that should
+		// already be happening elsewhere every time any type of request succeeds.
+	}
+}
+
 func (d *DHT) onPing(p *udpRequest.PeerRequest, req *Request) {
 	res := &Response{
 		Id:             d.queryID,
@@ -134,7 +198,7 @@ func (d *DHT) onFindNode(p *udpRequest.PeerRequest, req *Request) {
 
 	res := &Response{
 		Id:             d.queryID,
-		Nodes:          nil, //nodes.encode(d.nodes.closest(req.Target, 20))
+		Nodes:          encodeIPv4Nodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
 		RoundtripToken: d.makeToken(p),
 	}
 
@@ -150,6 +214,7 @@ func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
 	if err := proto.Unmarshal(reqBuf, req); err != nil {
 		return
 	}
+	d.addNode(p.Addr, req.Id, req.RoundtripToken)
 
 	if req.RoundtripToken != nil && !d.validToken(p, req.RoundtripToken) {
 		req.RoundtripToken = nil
@@ -192,6 +257,7 @@ func (d *DHT) request(ctx context.Context, peer net.Addr, req *Request) (*Respon
 	if err := proto.Unmarshal(resBuf, res); err != nil {
 		return nil, errors.WithMessage(err, "decoding response")
 	}
+	d.addNode(peer, res.Id, res.RoundtripToken)
 	return res, nil
 }
 
@@ -233,6 +299,10 @@ func New(c *Config) (*DHT, error) {
 	if !c.Ephemeral {
 		result.queryID = result.id[:]
 	}
+	result.nodes = kbucket.New(&kbucket.Config{
+		LocalID: result.id[:],
+		OnPing:  result.onNodePing,
+	})
 
 	for i := range result.secrets {
 		result.secrets[i] = make([]byte, secretSize)
@@ -253,6 +323,7 @@ func New(c *Config) (*DHT, error) {
 	// Don't start any of the background routines until everything that could fail is done.
 	result.done = make(chan struct{})
 	go result.rotateSecrets()
+	go result.updateTick()
 
 	return result, nil
 }
