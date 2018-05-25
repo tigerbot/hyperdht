@@ -8,6 +8,12 @@ import (
 	"sync"
 )
 
+// The default values for the Config struct.
+const (
+	DefaultBucketSize = 20
+	DefaultPingCount  = 3
+)
+
 type (
 	// FuncPing is called when a new contact will not fit in a bucket. It should ping all of
 	// the current contacts, and re-add any that respond to move them to the end of the list.
@@ -191,10 +197,10 @@ func New(c *Config) *KBucket {
 		rand.Read(c.LocalID)
 	}
 	if c.BucketSize == 0 {
-		c.BucketSize = 20
+		c.BucketSize = DefaultBucketSize
 	}
 	if c.NodePingCnt == 0 {
-		c.NodePingCnt = 3
+		c.NodePingCnt = DefaultPingCount
 	}
 	if c.Arbiter == nil {
 		c.Arbiter = Arbiter
