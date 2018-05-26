@@ -12,12 +12,14 @@ type contactWithAddr interface {
 	Addr() net.Addr
 }
 
+// A Node represents another peer
 type Node struct {
 	id   [IDSize]byte
 	addr net.Addr
 	tick uint64
 
 	roundTripToken []byte
+	prev, next     *Node
 }
 
 // ID returns the ID of the node on the network.

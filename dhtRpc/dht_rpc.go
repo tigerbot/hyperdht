@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	// IDSize is the number of bytes we expect in an ID
 	IDSize = 32
 
 	secretCnt      = 2
@@ -41,12 +42,16 @@ type Config struct {
 	Port   int
 }
 
+// A DHT holds everything needed to send RPC calls over a distributed hash table.
 type DHT struct {
 	id      [IDSize]byte
 	queryID []byte
 	secrets [secretCnt][]byte
-	tick    uint64
-	nodes   *kbucket.KBucket
+
+	tick   uint64
+	top    *Node
+	bottom *Node
+	nodes  *kbucket.KBucket
 
 	socket *udpRequest.UDPRequest
 	done   chan struct{}
@@ -63,10 +68,66 @@ func (d *DHT) updateTick() {
 
 		case <-ticker.C:
 			if tick := atomic.AddUint64(&d.tick, 1); tick&7 == 0 {
-				// TODO: d.pingSome()
+				d.pingSome()
 			}
 		}
 	}
+}
+func (d *DHT) pingSome() {
+	curTick := d.tick
+	oldest := d.bottom
+	for i := 0; i < 3 && oldest != nil; i++ {
+		if curTick-oldest.tick >= 3 {
+			go d.check(oldest)
+		}
+		oldest = oldest.next
+	}
+}
+func (d *DHT) check(n *Node) bool {
+	if _, err := d.Ping(context.TODO(), n.addr); err != nil {
+		d.nodes.Remove(n.ID())
+		return false
+	}
+	// We shouldn't need to update the node when the ping succeeds because that should
+	// already be happening elsewhere every time any type of request succeeds.
+	return true
+}
+
+func (d *DHT) onNodeAdd(c kbucket.Contact) {
+	n := c.(*Node)
+	if d.top == nil && d.bottom == nil {
+		d.top, d.bottom = n, n
+		n.prev, n.next = nil, nil
+	} else {
+		n.prev, n.next = d.top, nil
+		d.top.next = n
+		d.top = n
+	}
+}
+func (d *DHT) onNodeRemove(c kbucket.Contact) {
+	n := c.(*Node)
+	if d.bottom != n && d.top != n {
+		n.prev.next = n.next
+		n.next.prev = n.prev
+	} else {
+		if d.bottom == n {
+			d.bottom = n.next
+			if d.bottom != nil {
+				d.bottom.prev = nil
+			}
+		}
+		if d.top == n {
+			d.top = n.prev
+			if d.top != nil {
+				d.top.next = nil
+			}
+		}
+	}
+	n.next, n.prev = nil, nil
+}
+func (d *DHT) onNodeUpdate(old, fresh kbucket.Contact) {
+	d.onNodeRemove(old)
+	d.onNodeAdd(fresh)
 }
 
 func (d *DHT) makeToken(peer net.Addr) []byte {
@@ -168,15 +229,12 @@ func (d *DHT) onNodePing(current []kbucket.Contact, replacement kbucket.Contact)
 		}
 	}
 
-	ctx := context.TODO()
 	for _, n := range reping {
-		if err := d.Ping(ctx, n.addr); err != nil {
-			d.nodes.Remove(n.ID())
+		// If check returns false it already removed the stale contact so we can add the new one.
+		if !d.check(n) {
 			d.nodes.Add(n)
 			return
 		}
-		// We shouldn't need to update the node when the ping succeeds because that should
-		// already be happening elsewhere every time any type of request succeeds.
 	}
 }
 
@@ -261,9 +319,28 @@ func (d *DHT) request(ctx context.Context, peer net.Addr, req *Request) (*Respon
 	return res, nil
 }
 
-func (d *DHT) Ping(ctx context.Context, peer net.Addr) error {
+// Ping sends a special query that always responds with our address as the peer saw it.
+func (d *DHT) Ping(ctx context.Context, peer net.Addr) (net.Addr, error) {
 	cmd := "_ping"
-	_, err := d.request(ctx, peer, &Request{Command: &cmd, Id: d.queryID})
+	res, err := d.request(ctx, peer, &Request{Command: &cmd, Id: d.queryID})
+	if err != nil {
+		return nil, err
+	}
+	if publicAddr := decodeIPv4Peer(res.GetValue()); publicAddr == nil {
+		return publicAddr, nil
+	}
+	return nil, errors.New("response contained invalid address")
+}
+
+// Holepunch uses the `referrer` node as a STUN server to UDP hole punch to the `peer`.
+func (d *DHT) Holepunch(ctx context.Context, peer, referrer net.Addr) error {
+	cmd := "_ping"
+	req := &Request{
+		Command:        &cmd,
+		Id:             d.queryID,
+		ForwardRequest: encodeIPv4Peer(peer),
+	}
+	_, err := d.request(ctx, referrer, req)
 	return err
 }
 
@@ -279,6 +356,7 @@ func (d *DHT) Close() error {
 	return d.socket.Close()
 }
 
+// New creates a new dht-rpc instance.
 func New(c *Config) (*DHT, error) {
 	var err error
 	result := new(DHT)
@@ -302,6 +380,10 @@ func New(c *Config) (*DHT, error) {
 	result.nodes = kbucket.New(&kbucket.Config{
 		LocalID: result.id[:],
 		OnPing:  result.onNodePing,
+
+		OnAdd:    result.onNodeAdd,
+		OnRemove: result.onNodeRemove,
+		OnUpdate: result.onNodeUpdate,
 	})
 
 	for i := range result.secrets {
