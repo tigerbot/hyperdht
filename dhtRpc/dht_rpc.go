@@ -33,8 +33,7 @@ type Config struct {
 	ID          []byte
 	Ephemeral   bool
 	Concurrency int
-
-	BootStrap []string
+	BootStrap   []net.Addr
 
 	// Allows for custom socket types or instances to be used. If Socket is nil a new net.UDPConn
 	// is created that will listen on the specified port.
@@ -48,6 +47,7 @@ type DHT struct {
 	queryID     []byte
 	secrets     [secretCnt][]byte
 	concurrency int
+	bootstrap   []net.Addr
 
 	tick   uint64
 	top    *storedNode
@@ -357,6 +357,27 @@ func (d *DHT) Holepunch(ctx context.Context, peer, referrer net.Addr) error {
 	return err
 }
 
+func (d *DHT) Query(ctx context.Context, q *Query, opts *QueryOpts) <-chan QueryResponse {
+	stream := newQueryStream(ctx, d, q, opts)
+	return stream.responses
+}
+
+func (d *DHT) Update(ctx context.Context, q *Query, opts *QueryOpts) <-chan QueryResponse {
+	if opts == nil {
+		opts = new(QueryOpts)
+	}
+	opts.isUpdate = true
+
+	stream := newQueryStream(ctx, d, q, opts)
+	return stream.responses
+}
+
+func (d *DHT) Bootstrap(ctx context.Context) {
+	c := d.Query(ctx, &Query{Command: "_find_node", Target: d.id[:]}, nil)
+	for _ = range c {
+	}
+}
+
 // Close shuts down the underlying socket and quits all of the background go routines handling
 // periodic tasks. The underlying socket is closed even if it was initially provided in the config.
 func (d *DHT) Close() error {
@@ -381,6 +402,7 @@ func New(c *Config) (*DHT, error) {
 		c.Concurrency = 16
 	}
 	result.concurrency = c.Concurrency
+	result.bootstrap = c.BootStrap
 
 	if c.ID == nil {
 		c.ID = make([]byte, IDSize)

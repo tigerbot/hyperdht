@@ -54,13 +54,40 @@ type queryStream struct {
 	responses chan QueryResponse
 }
 
+func (s *queryStream) bootstap(peers []net.Addr) {
+	bg := func(addr net.Addr) {
+		node := new(queryNode)
+		node.addr = addr
+		s.send(node, false)
+
+		s.lock.Lock()
+		s.inflight--
+		s.cond.Broadcast()
+		s.lock.Unlock()
+	}
+
+	for i := range peers {
+		// We need to make sure the inflight value is incremented in this routine and not a
+		// sub routine. Otherwise we will have no guarantee it will be updated before the
+		// list drainers run and see no nodes pending and no requests in flight.
+		s.inflight++
+		go bg(peers[i])
+	}
+}
 func (s *queryStream) spawnRoutines(concurrency int) {
 	var wait sync.WaitGroup
-
 	wait.Add(concurrency)
+
+	// We acquire the lock and check the inflight number before spawning the routines to make
+	// sure we don't spin up too fast when we need to bootstrap.
+	s.lock.Lock()
 	for i := 0; i < concurrency; i++ {
+		for s.inflight >= concurrency {
+			s.cond.Wait()
+		}
 		go s.drainLists(&wait)
 	}
+	s.lock.Unlock()
 
 	wait.Wait()
 	close(s.responses)
@@ -208,6 +235,9 @@ func (s *queryStream) addClosest(peer net.Addr, res *Response) {
 
 func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts) *queryStream {
 	const k = 20
+	if query == nil || query.Target == nil {
+		panic("query.Target is required")
+	}
 	if opts == nil {
 		opts = new(QueryOpts)
 	}
@@ -241,14 +271,19 @@ func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts
 			result.addPending(n, nil)
 		}
 	} else {
-		bootstap := dht.nodes.Closest(kbucket.XORDistance(query.Target), k)
-		for _, c := range bootstap {
+		bootstrap := dht.nodes.Closest(kbucket.XORDistance(query.Target), k)
+		for _, c := range bootstrap {
 			if n, ok := c.(Node); ok {
 				result.addPending(n, nil)
 			}
 		}
 
-		// TODO: handle initial bootstrapping before nodes is populated.
+		// We don't have a full list of close nodes, which probably either means we haven't
+		// bootstrapped at all yet, or our list has decayed (assuming that's even possible)
+		// and we need to bootstrap again.
+		if len(bootstrap) < len(dht.bootstrap) && len(bootstrap) < k {
+			result.bootstap(dht.bootstrap)
+		}
 	}
 	go result.spawnRoutines(opts.Concurrency)
 
