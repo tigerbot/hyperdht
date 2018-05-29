@@ -49,8 +49,8 @@ type DHT struct {
 	secrets [secretCnt][]byte
 
 	tick   uint64
-	top    *Node
-	bottom *Node
+	top    *storedNode
+	bottom *storedNode
 	nodes  *kbucket.KBucket
 
 	socket *udpRequest.UDPRequest
@@ -83,7 +83,7 @@ func (d *DHT) pingSome() {
 		oldest = oldest.next
 	}
 }
-func (d *DHT) check(n *Node) bool {
+func (d *DHT) check(n *storedNode) bool {
 	if _, err := d.Ping(context.TODO(), n.addr); err != nil {
 		d.nodes.Remove(n.ID())
 		return false
@@ -93,8 +93,16 @@ func (d *DHT) check(n *Node) bool {
 	return true
 }
 
+// onNodeAdd, onNodeRemove, and onNodeUpdate all handle changes in the kbucket storage so we can
+// maintain a list of all nodes sorted by last contact time (instead of sorted by distance to
+// our ID and then last contact time). We use this list to periodically ping the oldest nodes.
 func (d *DHT) onNodeAdd(c kbucket.Contact) {
-	n := c.(*Node)
+	n, ok := c.(*storedNode)
+	if !ok {
+		d.nodes.Remove(c.ID())
+		return
+	}
+
 	if d.top == nil && d.bottom == nil {
 		d.top, d.bottom = n, n
 		n.prev, n.next = nil, nil
@@ -105,7 +113,11 @@ func (d *DHT) onNodeAdd(c kbucket.Contact) {
 	}
 }
 func (d *DHT) onNodeRemove(c kbucket.Contact) {
-	n := c.(*Node)
+	n, ok := c.(*storedNode)
+	if !ok {
+		return
+	}
+
 	if d.bottom != n && d.top != n {
 		n.prev.next = n.next
 		n.next.prev = n.prev
@@ -173,8 +185,8 @@ func (d *DHT) addNode(peer net.Addr, id, token []byte) {
 		return
 	}
 
-	node := new(Node)
-	copy(node.id[:], id)
+	node := new(storedNode)
+	node.id = id
 	node.addr = peer
 	node.roundTripToken = token
 	node.tick = atomic.LoadUint64(&d.tick)
@@ -215,11 +227,11 @@ func (d *DHT) forwardResponse(peer *udpRequest.PeerRequest, req *Request) *udpRe
 
 func (d *DHT) onNodePing(current []kbucket.Contact, replacement kbucket.Contact) {
 	curTick := atomic.LoadUint64(&d.tick)
-	reping := make([]*Node, 0, len(current))
+	reping := make([]*storedNode, 0, len(current))
 
 	for _, c := range current {
-		// The k-bucket shouldn't ever have anything but *Node, but handle it just in case
-		if node, ok := c.(*Node); !ok {
+		// The k-bucket shouldn't ever have the wrong type, but handle it just in case
+		if node, ok := c.(*storedNode); !ok {
 			d.nodes.Remove(c.ID())
 			d.nodes.Add(replacement)
 			return

@@ -7,32 +7,6 @@ import (
 	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
 )
 
-type contactWithAddr interface {
-	kbucket.Contact
-	Addr() net.Addr
-}
-
-// A Node represents another peer
-type Node struct {
-	id   [IDSize]byte
-	addr net.Addr
-	tick uint64
-
-	roundTripToken []byte
-	prev, next     *Node
-}
-
-// ID returns the ID of the node on the network.
-func (n *Node) ID() []byte {
-	cp := n.id
-	return cp[:]
-}
-
-// Addr returns the network address of the node (as we see it).
-func (n *Node) Addr() net.Addr {
-	return n.addr
-}
-
 func encodeIPv4Peer(peer net.Addr) []byte {
 	var host net.IP
 	var port int
@@ -63,7 +37,7 @@ func encodeIPv4Nodes(nodes []kbucket.Contact) []byte {
 
 	buf := make([]byte, 0, len(nodes)*totalSize)
 	for _, c := range nodes {
-		if node, ok := c.(contactWithAddr); !ok {
+		if node, ok := c.(Node); !ok {
 			// TODO? log this as some sort of warning
 		} else if id := node.ID(); len(id) != IDSize {
 			// TODO? log this as some sort of warning
@@ -85,4 +59,21 @@ func decodeIPv4Peer(buf []byte) net.Addr {
 		IP:   net.IP(buf[:4]),
 		Port: int(buf[4])<<8 | int(buf[5]),
 	}
+}
+func decodeIPv4Nodes(buf []byte) []Node {
+	const totalSize = IDSize + 6
+	if len(buf)%(IDSize+6) != 0 {
+		return nil
+	}
+
+	result := make([]Node, len(buf)/totalSize)
+	for i := range result {
+		start := i * totalSize
+		node := &basicNode{id: make([]byte, IDSize)}
+		copy(node.id, buf[start:start+IDSize])
+		node.addr = decodeIPv4Peer(buf[start+IDSize : start+totalSize])
+		result[i] = node
+	}
+
+	return result
 }
