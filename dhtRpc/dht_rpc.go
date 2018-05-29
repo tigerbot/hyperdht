@@ -44,9 +44,10 @@ type Config struct {
 
 // A DHT holds everything needed to send RPC calls over a distributed hash table.
 type DHT struct {
-	id      [IDSize]byte
-	queryID []byte
-	secrets [secretCnt][]byte
+	id          [IDSize]byte
+	queryID     []byte
+	secrets     [secretCnt][]byte
+	concurrency int
 
 	tick   uint64
 	top    *storedNode
@@ -375,6 +376,11 @@ func New(c *Config) (*DHT, error) {
 	if c == nil {
 		c = new(Config)
 	}
+
+	if c.Concurrency == 0 {
+		c.Concurrency = 16
+	}
+	result.concurrency = c.Concurrency
 
 	if c.ID == nil {
 		c.ID = make([]byte, IDSize)

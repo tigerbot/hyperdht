@@ -52,6 +52,16 @@ func (l *nodeList) get(id []byte) *queryNode {
 	return nil
 }
 
+func (l *nodeList) getUnqueried() *queryNode {
+	for _, n := range l.list {
+		if !n.queried {
+			return n
+		}
+	}
+
+	return nil
+}
+
 func (l *nodeList) insert(n *queryNode) {
 	if len(l.list) >= l.capacity && l.distCmp.Closer(l.list[len(l.list)-1].id, n.id) {
 		return
