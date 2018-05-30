@@ -3,8 +3,11 @@ package dhtRpc
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"net"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -221,4 +224,76 @@ func TestTargetedUpdate(t *testing.T) {
 	}
 
 	testQuery(t, pair.client, true, &update, opts, update.Value)
+}
+
+func TestSwarmQuery(t *testing.T) {
+	pair := createDHTPair()
+	defer pair.Close()
+
+	var wait sync.WaitGroup
+	var closest int32
+	start := func(ind int, node *DHT) {
+		defer wait.Done()
+
+		var value []byte
+		node.OnUpdate("kv", func(_ Node, q *Query) ([]byte, error) {
+			t.Logf("node update #%d on %x", atomic.AddInt32(&closest, 1), node.ID())
+			value = q.Value
+			return nil, nil
+		})
+		node.OnQuery("kv", func(_ Node, q *Query) ([]byte, error) {
+			return value, nil
+		})
+
+		ctx, done := context.WithTimeout(context.Background(), time.Second)
+		defer done()
+		if err := node.Bootstrap(ctx); err != nil {
+			t.Errorf("bootstrapping node #%d errored: %v", ind, err)
+		}
+	}
+
+	cfg := &Config{BootStrap: pair.server.bootstrap}
+	wait.Add(1)
+	go start(0, pair.server)
+	for i := 1; i < 256; i++ {
+		if node, err := New(cfg); err != nil {
+			t.Errorf("creating node #%d errored: %v", i, err)
+		} else {
+			defer node.Close()
+			wait.Add(1)
+			go start(i, node)
+		}
+	}
+	wait.Wait()
+
+	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	defer done()
+
+	key := sha256.Sum256([]byte("hello"))
+	updateVal := []byte("hello")
+	update := Query{
+		Command: "kv",
+		Target:  key[:],
+		Value:   updateVal,
+	}
+	if responses, err := CollectStream(pair.client.Update(ctx, &update, nil)); err != nil {
+		t.Error("update errored:", err)
+	} else if len(responses) != 20 {
+		t.Errorf("update received %d responses, expected 20", len(responses))
+	} else if nodeCnt := atomic.LoadInt32(&closest); nodeCnt != 20 {
+		t.Errorf("%d nodes received update, expected 20", nodeCnt)
+	}
+
+	query := Query{
+		Command: "kv",
+		Target:  key[:],
+	}
+	stream := pair.client.Query(ctx, &query, nil)
+	for resp := range stream.ResponseChan() {
+		if resp.Value != nil {
+			if !bytes.Equal(resp.Value, updateVal) {
+				t.Errorf("queried value %q doesn't match expected %q", resp.Value, updateVal)
+			}
+		}
+	}
 }
