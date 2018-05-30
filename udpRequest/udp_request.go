@@ -260,10 +260,12 @@ func (u *UDPRequest) Close() error {
 }
 
 // New creates a new UDPRequest instance and starts all of the relevant background goroutines.
-func New(c *Config) (*UDPRequest, error) {
-	if c == nil {
-		c = new(Config)
+func New(cfg *Config) (*UDPRequest, error) {
+	if cfg == nil {
+		cfg = new(Config)
 	}
+	c := *cfg
+
 	if c.Timeout == 0 {
 		c.Timeout = time.Second
 	}

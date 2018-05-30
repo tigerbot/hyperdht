@@ -510,13 +510,14 @@ func (d *DHT) Close() error {
 }
 
 // New creates a new dht-rpc instance.
-func New(c *Config) (*DHT, error) {
+func New(cfg *Config) (*DHT, error) {
+	if cfg == nil {
+		cfg = new(Config)
+	}
+	c := *cfg
+
 	var err error
 	result := new(DHT)
-	if c == nil {
-		c = new(Config)
-	}
-
 	if c.Concurrency == 0 {
 		c.Concurrency = 16
 	}

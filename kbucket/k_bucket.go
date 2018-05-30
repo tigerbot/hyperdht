@@ -236,10 +236,12 @@ func (b *KBucket) Closest(cmp DistanceCmp, cnt int) []Contact {
 }
 
 // New creates a new KBucket instance
-func New(c *Config) *KBucket {
-	if c == nil {
-		c = new(Config)
+func New(cfg *Config) *KBucket {
+	if cfg == nil {
+		cfg = new(Config)
 	}
+	c := *cfg
+
 	if c.LocalID == nil {
 		c.LocalID = make([]byte, 20)
 		rand.Read(c.LocalID)
