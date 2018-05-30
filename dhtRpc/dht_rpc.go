@@ -555,13 +555,13 @@ func New(cfg *Config) (*DHT, error) {
 	result.handlers = make(map[string]QueryHandler)
 
 	result.socket, err = udpRequest.New(&udpRequest.Config{
-		Socket:  c.Socket,
-		Port:    c.Port,
-		Handler: result,
+		Socket: c.Socket,
+		Port:   c.Port,
 	})
 	if err != nil {
 		return nil, errors.WithMessage(err, "creating socket")
 	}
+	result.socket.SetHandler(result)
 
 	// Don't start any of the background routines until everything that could fail is done.
 	result.done = make(chan struct{})

@@ -88,7 +88,7 @@ type UDPRequest struct {
 	pending map[int]*pendingRequest
 	retry   bool
 
-	Handler Handler
+	handler Handler
 }
 
 // Addr returns the local address that the PacketConn is attached to.
@@ -170,23 +170,33 @@ func (u *UDPRequest) readMessages() {
 		if n < 2 {
 			continue
 		}
+
 		header := int(buf[0])<<8 | int(buf[1])
+		u.lock.RLock()
+		h := u.handler
+		p := u.pending[header]
+		u.lock.RUnlock()
 		if header&requestMarker != 0 {
-			if h := u.Handler; h != nil {
+			if h != nil {
 				cp := make([]byte, n-2)
 				copy(cp, buf[2:])
 				go h.HandleUDPRequest(&PeerRequest{addr, header & maxTick}, cp)
 			}
 		} else {
-			u.lock.RLock()
-			if p := u.pending[header]; p != nil {
+			if p != nil {
 				cp := make([]byte, n-2)
 				copy(cp, buf[2:])
 				p.c <- cp
 			}
-			u.lock.RUnlock()
 		}
 	}
+}
+
+// SetHandler sets the provided handler as the one that will be used for incoming requests.
+func (u *UDPRequest) SetHandler(h Handler) {
+	u.lock.Lock()
+	defer u.lock.Unlock()
+	u.handler = h
 }
 
 // Request wraps the provided request data in a request frame and sends it to the specified peer
@@ -281,7 +291,7 @@ func New(cfg *Config) (*UDPRequest, error) {
 		result.socket = sock
 	}
 
-	result.Handler = c.Handler
+	result.handler = c.Handler
 	result.tick = uint32(rand.Intn(maxTick))
 	result.pending = make(map[int]*pendingRequest, 4)
 	result.retry = c.Retry

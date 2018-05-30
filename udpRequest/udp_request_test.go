@@ -62,7 +62,7 @@ func checkTimeoutErr(t *testing.T, sock *UDPRequest) {
 func TestRequest(t *testing.T) {
 	sock := mustCreate(nil)
 	defer sock.Close()
-	sock.Handler = &Echoer{sock: sock}
+	sock.SetHandler(&Echoer{sock: sock})
 
 	testEcho(t, sock, "hello world!", nil)
 }
@@ -70,7 +70,7 @@ func TestRequest(t *testing.T) {
 func TestMultipleRequests(t *testing.T) {
 	sock := mustCreate(nil)
 	defer sock.Close()
-	sock.Handler = &Echoer{sock: sock}
+	sock.SetHandler(&Echoer{sock: sock})
 
 	messages := []string{
 		"This is the first message.",
@@ -118,7 +118,7 @@ func TestRetry(t *testing.T) {
 	sock := mustCreate(&Config{Timeout: 5 * time.Millisecond, Retry: true})
 	defer sock.Close()
 	echo := &Echoer{sock: sock, reject: 2}
-	sock.Handler = echo
+	sock.SetHandler(echo)
 
 	testEcho(t, sock, "This is a test message", nil)
 	if echo.rejected != 2 {
@@ -127,37 +127,23 @@ func TestRetry(t *testing.T) {
 }
 
 func TestForward(t *testing.T) {
-	// Even though everything in this test happens in a deterministic non-racey order, the
-	// nature of the go routines involved makes it so the race detector can't know that. As
-	// such we need to utilize a lock in the handlers and assign the handlers through the config.
-	var lock sync.Mutex
-	lock.Lock()
-	var origin, middle, remote *UDPRequest
+	origin, middle, remote := mustCreate(nil), mustCreate(nil), mustCreate(nil)
+	defer origin.Close()
+	defer middle.Close()
+	defer remote.Close()
 
 	// The layer that can actually handle requests to forward to a particular peer is a layer above
 	// us, so we have the "to" value hard coded to what the test needs to pass.
-	midHandler := HandlerFunc(func(p *PeerRequest, msg []byte) {
-		lock.Lock()
+	middle.SetHandler(HandlerFunc(func(p *PeerRequest, msg []byte) {
 		if err := middle.ForwardRequest(p, remote.Addr(), msg); err != nil {
 			t.Errorf("middle failed to forward to remote: %v", err)
 		}
-		lock.Unlock()
-	})
-	remHandler := HandlerFunc(func(p *PeerRequest, msg []byte) {
-		lock.Lock()
+	}))
+	remote.SetHandler(HandlerFunc(func(p *PeerRequest, msg []byte) {
 		if err := remote.ForwardResponse(p, origin.Addr(), msg); err != nil {
 			t.Errorf("remote failed to forward to origin: %v", err)
 		}
-		lock.Unlock()
-	})
-
-	origin = mustCreate(nil)
-	defer origin.Close()
-	middle = mustCreate(&Config{Handler: midHandler})
-	defer middle.Close()
-	remote = mustCreate(&Config{Handler: remHandler})
-	defer remote.Close()
-	lock.Unlock()
+	}))
 
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
