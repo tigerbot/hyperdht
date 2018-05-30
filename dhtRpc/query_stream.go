@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/pkg/errors"
 	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
 )
 
@@ -33,7 +34,8 @@ type QueryOpts struct {
 	isUpdate bool
 }
 
-type queryStream struct {
+// A QueryStream holds all of the context needed to make queries or updates to remote peers.
+type QueryStream struct {
 	ctx   context.Context
 	dht   *DHT
 	query *Query
@@ -41,6 +43,9 @@ type queryStream struct {
 	lock     sync.Mutex
 	cond     sync.Cond
 	inflight int
+
+	respCnt   int
+	commitCnt int
 
 	isUpdate   bool
 	verbose    bool
@@ -51,10 +56,45 @@ type queryStream struct {
 	moveCloser bool
 	holepunch  bool
 
-	responses chan QueryResponse
+	respChan chan QueryResponse
+	errChan  chan error
+	warnChan chan error
 }
 
-func (s *queryStream) bootstap(peers []net.Addr) {
+// ResponseChan returns the channel that can be used to access all responses from the remote peers
+// as they come in. The channel will be closed when the query is finished, so it is safe to range
+// over.
+func (s *QueryStream) ResponseChan() <-chan QueryResponse { return s.respChan }
+
+// ErrorChan returns the channel that can be used to access any error encountered at the end of the
+// query. It is buffered and will be written to exactly once immediately before the response
+// channel is closed.
+func (s *QueryStream) ErrorChan() <-chan error { return s.errChan }
+
+// WarningChan returns the channel that can be used to access any errors connecting to individual
+// remote peers.
+func (s *QueryStream) WarningChan() <-chan error { return s.warnChan }
+
+// ResponseCnt returns the number of responses received from remote peers. It might be bigger than
+// the number of responses sent over the response channel because it will include responses from
+// peers with invalid IDs and responses received while getting closer to relevant node for an
+// update (which will only be sent over the channel in verbose mode).
+func (s *QueryStream) ResponseCnt() int {
+	s.lock.Lock()
+	result := s.respCnt
+	s.lock.Unlock()
+	return result
+}
+
+// CommitCnt returns the number of responses received from the update requests.
+func (s *QueryStream) CommitCnt() int {
+	s.lock.Lock()
+	result := s.commitCnt
+	s.lock.Unlock()
+	return result
+}
+
+func (s *QueryStream) bootstap(peers []net.Addr) {
 	bg := func(addr net.Addr) {
 		node := new(queryNode)
 		node.addr = addr
@@ -74,7 +114,7 @@ func (s *queryStream) bootstap(peers []net.Addr) {
 		go bg(peers[i])
 	}
 }
-func (s *queryStream) spawnRoutines(concurrency int) {
+func (s *QueryStream) spawnRoutines(concurrency int) {
 	var wait sync.WaitGroup
 	wait.Add(concurrency)
 
@@ -90,10 +130,19 @@ func (s *queryStream) spawnRoutines(concurrency int) {
 	s.lock.Unlock()
 
 	wait.Wait()
-	close(s.responses)
+	if err := s.ctx.Err(); err != nil {
+		s.errChan <- err
+	} else if s.respCnt == 0 {
+		s.errChan <- errors.New("no nodes responded")
+	} else if s.committing && s.commitCnt == 0 {
+		s.errChan <- errors.New("no close node responded to update")
+	} else {
+		s.errChan <- nil
+	}
+	close(s.respChan)
 }
 
-func (s *queryStream) drainLists(wait *sync.WaitGroup) {
+func (s *QueryStream) drainLists(wait *sync.WaitGroup) {
 	defer wait.Done()
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -137,7 +186,7 @@ func (s *queryStream) drainLists(wait *sync.WaitGroup) {
 	}
 }
 
-func (s *queryStream) send(node *queryNode, useToken bool) {
+func (s *QueryStream) send(node *queryNode, useToken bool) {
 	req := &Request{
 		Command: &s.query.Command,
 		Id:      s.dht.queryID,
@@ -167,11 +216,21 @@ func (s *queryStream) send(node *queryNode, useToken bool) {
 		if node.id != nil {
 			s.dht.nodes.Remove(node.id)
 		}
-		// TODO? other error handling/tracking.
+
+		select {
+		case s.warnChan <- err:
+		default:
+		}
+
 		return
 	}
 
 	s.lock.Lock()
+	s.respCnt++
+	if s.committing {
+		s.commitCnt++
+	}
+
 	s.addClosest(node.addr, res)
 	if s.moveCloser {
 		for _, n := range decodeIPv4Nodes(res.GetNodes()) {
@@ -192,12 +251,12 @@ func (s *queryStream) send(node *queryNode, useToken bool) {
 		Value: res.Value,
 	}
 	select {
-	case s.responses <- queryRes:
+	case s.respChan <- queryRes:
 	case <-s.ctx.Done():
 	}
 }
 
-func (s *queryStream) addPending(node Node, ref net.Addr) {
+func (s *QueryStream) addPending(node Node, ref net.Addr) {
 	if node == nil || bytes.Equal(node.ID(), s.dht.id[:]) {
 		return
 	}
@@ -211,7 +270,7 @@ func (s *queryStream) addPending(node Node, ref net.Addr) {
 	}
 	s.pending.insert(qNode)
 }
-func (s *queryStream) addClosest(peer net.Addr, res *Response) {
+func (s *QueryStream) addClosest(peer net.Addr, res *Response) {
 	id := res.GetId()
 	if id == nil || res.GetRoundtripToken() == nil || bytes.Equal(id, s.dht.id[:]) {
 		return
@@ -233,7 +292,7 @@ func (s *queryStream) addClosest(peer net.Addr, res *Response) {
 	s.closest.insert(qNode)
 }
 
-func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts) *queryStream {
+func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts) *QueryStream {
 	const k = 20
 	if query == nil || query.Target == nil {
 		panic("query.Target is required")
@@ -245,7 +304,7 @@ func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts
 		opts.Concurrency = dht.concurrency
 	}
 
-	result := &queryStream{
+	result := &QueryStream{
 		ctx:   ctx,
 		dht:   dht,
 		query: query,
@@ -259,7 +318,9 @@ func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts
 		moveCloser: len(opts.Nodes) == 0,
 		holepunch:  !opts.DisableHolepunching,
 
-		responses: make(chan QueryResponse),
+		respChan: make(chan QueryResponse),
+		errChan:  make(chan error, 1),
+		warnChan: make(chan error),
 	}
 	result.cond.L = &result.lock
 
@@ -288,4 +349,14 @@ func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts
 	go result.spawnRoutines(opts.Concurrency)
 
 	return result
+}
+
+// CollectStream reads from a QueryStream's channels until the query is complete and returns
+// all responses written the the response channel and the final error.
+func CollectStream(stream *QueryStream) ([]QueryResponse, error) {
+	var responses []QueryResponse
+	for resp := range stream.respChan {
+		responses = append(responses, resp)
+	}
+	return responses, <-stream.errChan
 }

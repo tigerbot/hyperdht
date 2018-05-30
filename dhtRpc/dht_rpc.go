@@ -357,25 +357,26 @@ func (d *DHT) Holepunch(ctx context.Context, peer, referrer net.Addr) error {
 	return err
 }
 
-func (d *DHT) Query(ctx context.Context, q *Query, opts *QueryOpts) <-chan QueryResponse {
-	stream := newQueryStream(ctx, d, q, opts)
-	return stream.responses
+func (d *DHT) Query(ctx context.Context, q *Query, opts *QueryOpts) *QueryStream {
+	return newQueryStream(ctx, d, q, opts)
 }
 
-func (d *DHT) Update(ctx context.Context, q *Query, opts *QueryOpts) <-chan QueryResponse {
+func (d *DHT) Update(ctx context.Context, q *Query, opts *QueryOpts) *QueryStream {
 	if opts == nil {
 		opts = new(QueryOpts)
 	}
 	opts.isUpdate = true
 
-	stream := newQueryStream(ctx, d, q, opts)
-	return stream.responses
+	return newQueryStream(ctx, d, q, opts)
 }
 
-func (d *DHT) Bootstrap(ctx context.Context) {
-	c := d.Query(ctx, &Query{Command: "_find_node", Target: d.id[:]}, nil)
-	for _ = range c {
+func (d *DHT) Bootstrap(ctx context.Context) error {
+	stream := d.Query(ctx, &Query{Command: "_find_node", Target: d.id[:]}, nil)
+	// We don't use CollectStream here because we don't want to store all of the reponses in
+	// memory when we don't have to.
+	for _ = range stream.respChan {
 	}
+	return <-stream.errChan
 }
 
 // Close shuts down the underlying socket and quits all of the background go routines handling
