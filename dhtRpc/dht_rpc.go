@@ -67,6 +67,30 @@ type DHT struct {
 	done   chan struct{}
 }
 
+// ID returns the ID being used by the DHT.
+func (d *DHT) ID() []byte {
+	return d.id[:]
+}
+
+// Addr returns the network address the socket underlying the DHT is using.
+func (d *DHT) Addr() net.Addr {
+	return d.socket.Addr()
+}
+
+// Nodes returns all of the nodes currently stored in our local part of the table.
+func (d *DHT) Nodes() []Node {
+	stored := d.nodes.Contacts()
+	result := make([]Node, 0, len(stored))
+	for _, c := range stored {
+		if n, ok := c.(Node); !ok {
+			d.nodes.Remove(c.ID())
+		} else {
+			result = append(result, n)
+		}
+	}
+	return result
+}
+
 func (d *DHT) updateTick() {
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
@@ -527,6 +551,7 @@ func New(c *Config) (*DHT, error) {
 			return nil, errors.WithMessage(err, "creating random secret")
 		}
 	}
+	result.handlers = make(map[string]QueryHandler)
 
 	result.socket, err = udpRequest.New(&udpRequest.Config{
 		Socket:  c.Socket,
