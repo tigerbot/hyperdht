@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,6 +28,11 @@ const (
 	secretLifetime = 5 * time.Minute
 	tickInterval   = 5 * time.Second
 )
+
+// A QueryHandler handles query events from remote peers.
+type QueryHandler func(Node, *Query) ([]byte, error)
+
+func noopHandler(Node, *Query) ([]byte, error) { return nil, nil }
 
 // Config contains all of the options available for a DHT instance
 type Config struct {
@@ -48,6 +54,9 @@ type DHT struct {
 	secrets     [secretCnt][]byte
 	concurrency int
 	bootstrap   []net.Addr
+
+	lock     sync.RWMutex
+	handlers map[string]QueryHandler
 
 	tick   uint64
 	top    *storedNode
@@ -276,6 +285,92 @@ func (d *DHT) onFindNode(p *udpRequest.PeerRequest, req *Request) {
 		d.socket.Respond(p, buf)
 	}
 }
+func (d *DHT) onQuery(p *udpRequest.PeerRequest, req *Request) {
+	if len(req.Target) != IDSize {
+		return
+	}
+
+	node := &basicNode{
+		id:   req.Id,
+		addr: p.Addr,
+	}
+	query := &Query{
+		Command: req.GetCommand(),
+		Target:  req.Target,
+		Value:   req.Value,
+	}
+
+	var method string
+	if req.RoundtripToken != nil {
+		method = "update"
+	} else {
+		method = "query"
+	}
+
+	var handler QueryHandler
+	d.lock.RLock()
+	if h := d.handlers[method+":"+req.GetCommand()]; h != nil {
+		handler = h
+	} else if h = d.handlers[method]; h != nil {
+		handler = h
+	} else {
+		handler = noopHandler
+	}
+	d.lock.RUnlock()
+
+	value, err := handler(node, query)
+	if err != nil {
+		return
+	}
+	res := &Response{
+		Id:             d.queryID,
+		Value:          value,
+		Nodes:          encodeIPv4Nodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
+		RoundtripToken: d.makeToken(p),
+	}
+
+	if buf, err := proto.Marshal(res); err == nil {
+		d.socket.Respond(p, buf)
+	}
+}
+
+// OnQuery registers handlers for incoming queries. If the command string is the zero-value then
+// the handler will be used for any incoming queries whose command does not match one with a
+// specific handler added. Only one handler may be added for a particular event at a time, so
+// adding a nil handler will effectively disable the previous handler.
+func (d *DHT) OnQuery(command string, handler QueryHandler) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	key := "query"
+	if command != "" {
+		key += ":" + command
+	}
+	if handler != nil {
+		d.handlers[key] = handler
+	} else {
+		delete(d.handlers, key)
+	}
+}
+
+// OnUpdate registers handlers for incoming updates. If the command string is the zero-value then
+// the handler will be used for any incoming updates whose command does not match one with a
+// specific handler added. Only one handler may be added for a particular event at a time, so
+// adding a nil handler will effectively disable the previous handler.
+func (d *DHT) OnUpdate(command string, handler QueryHandler) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	key := "update"
+	if command != "" {
+		key += ":" + command
+	}
+	if handler != nil {
+		d.handlers[key] = handler
+	} else {
+		delete(d.handlers, key)
+	}
+}
 
 // HandleUDPRequest implements the udpRequest.Handler interface. It is not recommended to
 // use this function directly even though it is exported.
@@ -307,7 +402,7 @@ func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
 	case "_find_node":
 		d.onFindNode(p, req)
 	default:
-		// d.onQuery(p, req)
+		d.onQuery(p, req)
 	}
 }
 
