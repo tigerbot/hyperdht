@@ -23,10 +23,9 @@ func (n *basicNode) Addr() net.Addr { return n.addr }
 
 type storedNode struct {
 	basicNode
-	tick uint64
 
-	roundTripToken []byte
-	prev, next     *storedNode
+	tick       uint64
+	prev, next *storedNode
 }
 
 type queryNode struct {

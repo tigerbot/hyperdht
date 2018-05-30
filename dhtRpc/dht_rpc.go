@@ -181,7 +181,7 @@ func (d *DHT) rotateSecrets() {
 	}
 }
 
-func (d *DHT) addNode(peer net.Addr, id, token []byte) {
+func (d *DHT) addNode(peer net.Addr, id []byte) {
 	if len(id) != IDSize || bytes.Equal(d.id[:], id) {
 		return
 	}
@@ -189,7 +189,6 @@ func (d *DHT) addNode(peer net.Addr, id, token []byte) {
 	node := new(storedNode)
 	node.id = id
 	node.addr = peer
-	node.roundTripToken = token
 	node.tick = atomic.LoadUint64(&d.tick)
 
 	d.nodes.Add(node)
@@ -285,7 +284,7 @@ func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
 	if err := proto.Unmarshal(reqBuf, req); err != nil {
 		return
 	}
-	d.addNode(p.Addr, req.Id, req.RoundtripToken)
+	d.addNode(p.Addr, req.Id)
 
 	if req.RoundtripToken != nil && !d.validToken(p, req.RoundtripToken) {
 		req.RoundtripToken = nil
@@ -328,7 +327,7 @@ func (d *DHT) request(ctx context.Context, peer net.Addr, req *Request) (*Respon
 	if err := proto.Unmarshal(resBuf, res); err != nil {
 		return nil, errors.WithMessage(err, "decoding response")
 	}
-	d.addNode(peer, res.Id, res.RoundtripToken)
+	d.addNode(peer, res.Id)
 	return res, nil
 }
 
