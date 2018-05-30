@@ -81,6 +81,11 @@ func (b *KBucket) OnPing(f FuncPing) {
 
 // OnAdd sets the ping handler. Only one function may the handler at a time. To ignore add
 // events a nil value may be used.
+//
+// Because some applications require that the order OnAdd, OnUpdate, and OnRemove functions
+// are called in is consistent with how they are added these functions are not called in
+// separate go routines and the internal lock is held. As such it is recommended that these
+// functions not perform any asynchronous task in their own routine.
 func (b *KBucket) OnAdd(f FuncAddRemove) {
 	b.lock.Lock()
 	b.onAdd = f
@@ -89,6 +94,11 @@ func (b *KBucket) OnAdd(f FuncAddRemove) {
 
 // OnRemove sets the ping handler. Only one function may the handler at a time. To ignore remove
 // events a nil value may be used.
+//
+// Because some applications require that the order OnAdd, OnUpdate, and OnRemove functions
+// are called in is consistent with how they are added these functions are not called in
+// separate go routines and the internal lock is held. As such it is recommended that these
+// functions not perform any asynchronous task in their own routine.
 func (b *KBucket) OnRemove(f FuncAddRemove) {
 	b.lock.Lock()
 	b.onRemove = f
@@ -97,6 +107,11 @@ func (b *KBucket) OnRemove(f FuncAddRemove) {
 
 // OnUpdate sets the ping handler. Only one function may the handler at a time. To ignore update
 // events a nil value may be used.
+//
+// Because some applications require that the order OnAdd, OnUpdate, and OnRemove functions
+// are called in is consistent with how they are added these functions are not called in
+// separate go routines and the internal lock is held. As such it is recommended that these
+// functions not perform any asynchronous task in their own routine.
 func (b *KBucket) OnUpdate(f FuncUpdate) {
 	b.lock.Lock()
 	b.onUpdate = f
@@ -122,7 +137,7 @@ func (b *KBucket) add(c Contact) {
 		node.removeIndex(index)
 		node.addContact(selection)
 		if b.onUpdate != nil {
-			go b.onUpdate(incumbent, selection)
+			b.onUpdate(incumbent, selection)
 		}
 		return
 	}
@@ -131,7 +146,7 @@ func (b *KBucket) add(c Contact) {
 	if node.size() < b.bucketsize {
 		node.addContact(c)
 		if b.onAdd != nil {
-			go b.onAdd(c)
+			b.onAdd(c)
 		}
 		return
 	}
