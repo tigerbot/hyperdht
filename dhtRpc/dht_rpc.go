@@ -51,12 +51,14 @@ type Config struct {
 type DHT struct {
 	id          [IDSize]byte
 	queryID     []byte
-	secrets     [secretCnt][]byte
 	concurrency int
 	rateLimiter chan bool
 	bootstrap   []net.Addr
 
+	// secrets and handlers have nothing in common except that they need to be thread safe and
+	// will change very rarely compared to how often they are used, so they share an RWLock
 	lock     sync.RWMutex
+	secrets  [secretCnt][]byte
 	handlers map[string]QueryHandler
 
 	tick   uint64
@@ -178,12 +180,18 @@ func (d *DHT) onNodeUpdate(old, fresh kbucket.Contact) {
 }
 
 func (d *DHT) makeToken(peer net.Addr) []byte {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+
 	h := sha256.New()
 	h.Write(d.secrets[0])
 	h.Write([]byte(peer.String()))
 	return h.Sum(nil)
 }
 func (d *DHT) validToken(peer net.Addr, token []byte) bool {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+
 	h := sha256.New()
 	for _, s := range d.secrets {
 		h.Reset()
@@ -206,11 +214,13 @@ func (d *DHT) rotateSecrets() {
 			return
 
 		case <-ticker.C:
-			for i := range d.secrets[:secretCnt-1] {
-				d.secrets[i] = d.secrets[i+1]
+			d.lock.Lock()
+			for i := secretCnt - 1; i > 0; i-- {
+				d.secrets[i] = d.secrets[i-1]
 			}
-			d.secrets[secretCnt-1] = make([]byte, secretSize)
-			rand.Read(d.secrets[secretCnt-1])
+			d.secrets[0] = make([]byte, secretSize)
+			rand.Read(d.secrets[0])
+			d.lock.Unlock()
 		}
 	}
 }
@@ -260,6 +270,9 @@ func (d *DHT) forwardResponse(peer *udpRequest.PeerRequest, req *Request) *udpRe
 }
 
 func (d *DHT) onNodePing(current []kbucket.Contact, replacement kbucket.Contact) {
+	if _, ok := replacement.(*storedNode); !ok {
+		return
+	}
 	curTick := atomic.LoadUint64(&d.tick)
 	reping := make([]*storedNode, 0, len(current))
 
@@ -278,7 +291,7 @@ func (d *DHT) onNodePing(current []kbucket.Contact, replacement kbucket.Contact)
 	for _, n := range reping {
 		// If check returns false it already removed the stale contact so we can add the new one.
 		if !d.check(n) {
-			d.nodes.Add(n)
+			d.nodes.Add(replacement)
 			return
 		}
 	}
@@ -482,10 +495,16 @@ func (d *DHT) Holepunch(ctx context.Context, peer, referrer net.Addr) error {
 	return err
 }
 
+// Query creates a new query.
 func (d *DHT) Query(ctx context.Context, q *Query, opts *QueryOpts) *QueryStream {
 	return newQueryStream(ctx, d, q, opts)
 }
 
+// Update is similar to Query except that it will trigger an update query on the 20 closest
+// node (distance between node IDs and the target) after the query is finished.
+//
+// By default the stream will only write to the channel results from the update queries to
+// the closest nodes. To include all query responses set the Verbose option to true.
 func (d *DHT) Update(ctx context.Context, q *Query, opts *QueryOpts) *QueryStream {
 	if opts == nil {
 		opts = new(QueryOpts)
@@ -495,6 +514,10 @@ func (d *DHT) Update(ctx context.Context, q *Query, opts *QueryOpts) *QueryStrea
 	return newQueryStream(ctx, d, q, opts)
 }
 
+// Bootstrap finds the closest peers to the DHT's ID. Calling it before calling other queries
+// might make the queries faster, but it is not necessary.
+//
+// Bootstrap should be called at regular intervals if you aren't doing any other queries.
 func (d *DHT) Bootstrap(ctx context.Context) error {
 	stream := d.Query(ctx, &Query{Command: "_find_node", Target: d.id[:]}, nil)
 	// We don't use CollectStream here because we don't want to store all of the reponses in
