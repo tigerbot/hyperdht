@@ -53,6 +53,7 @@ type DHT struct {
 	queryID     []byte
 	secrets     [secretCnt][]byte
 	concurrency int
+	rateLimiter chan bool
 	bootstrap   []net.Addr
 
 	lock     sync.RWMutex
@@ -436,7 +437,13 @@ func (d *DHT) request(ctx context.Context, peer net.Addr, req *Request) (*Respon
 		return nil, errors.WithMessage(err, "encoding request")
 	}
 
-	// TODO: limit the number of concurrent requests.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-d.rateLimiter:
+		defer func() { d.rateLimiter <- true }()
+	}
+
 	resBuf, err := d.socket.Request(ctx, peer, reqBuf)
 	if err != nil {
 		return nil, err
@@ -522,6 +529,10 @@ func New(cfg *Config) (*DHT, error) {
 		c.Concurrency = 16
 	}
 	result.concurrency = c.Concurrency
+	result.rateLimiter = make(chan bool, c.Concurrency)
+	for i := 0; i < c.Concurrency; i++ {
+		result.rateLimiter <- true
+	}
 	result.bootstrap = c.BootStrap
 
 	if c.ID == nil {

@@ -61,6 +61,75 @@ func createDHTPair() *dhtPair {
 	return result
 }
 
+type dhtSwarm struct {
+	bootstrap *DHT
+	servers   []*DHT
+	client    *DHT
+}
+
+func (s *dhtSwarm) Close() {
+	var errs []error
+
+	if err := s.bootstrap.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	for _, s := range s.servers {
+		if err := s.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := s.client.Close(); err != nil {
+		errs = append(errs, err)
+	}
+
+	if errs != nil {
+		panic(errs)
+	}
+}
+
+func createSwarm(size int) *dhtSwarm {
+	result := new(dhtSwarm)
+	var err error
+	if result.bootstrap, err = New(&Config{Ephemeral: true}); err != nil {
+		panic(err)
+	}
+
+	addr := result.bootstrap.Addr().(*net.UDPAddr)
+	addr.IP = net.IPv4(127, 0, 0, 1)
+	cfg := &Config{BootStrap: []net.Addr{addr}}
+
+	// We have a rather long timeout here for the race condition tests. With how many routines
+	// we spawn here it takes a lot of work for the race detector to do whatever it needs to do
+	// to detect the races, so we allow it plenty of time. Normal tests Shouldn't take that long.
+	ctx, done := context.WithTimeout(context.Background(), 20*time.Second)
+	defer done()
+	var wait sync.WaitGroup
+	start := func(node *DHT) {
+		defer wait.Done()
+
+		if err := node.Bootstrap(ctx); err != nil {
+			panic(err)
+		}
+	}
+
+	wait.Add(size)
+	for i := 0; i < size; i++ {
+		if node, err := New(cfg); err != nil {
+			panic(err)
+		} else {
+			result.servers = append(result.servers, node)
+			go start(node)
+		}
+	}
+	wait.Wait()
+
+	if result.client, err = New(cfg); err != nil {
+		panic(err)
+	}
+
+	return result
+}
+
 func testQuery(t *testing.T, client *DHT, update bool, query *Query, opts *QueryOpts, respValue []byte) {
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
@@ -226,45 +295,76 @@ func TestTargetedUpdate(t *testing.T) {
 	testQuery(t, pair.client, true, &update, opts, update.Value)
 }
 
+func TestRateLimit(t *testing.T) {
+	// We need a swarm so the query stream has more than one peer to query at a time.
+	swarm := createSwarm(128)
+	defer swarm.Close()
+	for _, s := range swarm.servers {
+		s.OnQuery("", func(Node, *Query) ([]byte, error) {
+			time.Sleep(time.Millisecond)
+			return []byte("world"), nil
+		})
+	}
+
+	const parellel = 4
+	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	defer done()
+	streamFinished := make(chan bool)
+	for i := 0; i < parellel; i++ {
+		query := Query{
+			Command: "hello",
+			Target:  swarm.servers[i].ID(),
+		}
+		go func() {
+			defer func() { streamFinished <- true }()
+			stream := swarm.client.Query(ctx, &query, nil)
+			// ResponseChan must be drained or it will back pressure the query.
+			for _ = range stream.ResponseChan() {
+			}
+			if err := <-stream.ErrorChan(); err != nil {
+				t.Errorf("backgrounded query errored: %v", err)
+			}
+		}()
+	}
+
+	var finished int
+	ticker := time.NewTicker(time.Millisecond / 4)
+	defer ticker.Stop()
+	var counts []int
+	for {
+		select {
+		case <-streamFinished:
+			if finished++; finished >= parellel {
+				t.Log(counts)
+				return
+			}
+
+		case <-ticker.C:
+			if cur, limit := swarm.client.socket.Pending(), swarm.client.concurrency; cur > limit {
+				t.Fatalf("DHT currently has %d requests pending, expected <= %d", cur, limit)
+			} else {
+				counts = append(counts, cur)
+			}
+		}
+	}
+}
+
 func TestSwarmQuery(t *testing.T) {
-	pair := createDHTPair()
-	defer pair.Close()
+	swarm := createSwarm(256)
+	defer swarm.Close()
 
-	var wait sync.WaitGroup
 	var closest int32
-	start := func(ind int, node *DHT) {
-		defer wait.Done()
-
+	for _, node := range swarm.servers {
 		var value []byte
 		node.OnUpdate("kv", func(_ Node, q *Query) ([]byte, error) {
-			t.Logf("node update #%d on %x", atomic.AddInt32(&closest, 1), node.ID())
+			atomic.AddInt32(&closest, 1)
 			value = q.Value
 			return nil, nil
 		})
 		node.OnQuery("kv", func(_ Node, q *Query) ([]byte, error) {
 			return value, nil
 		})
-
-		ctx, done := context.WithTimeout(context.Background(), time.Second)
-		defer done()
-		if err := node.Bootstrap(ctx); err != nil {
-			t.Errorf("bootstrapping node #%d errored: %v", ind, err)
-		}
 	}
-
-	cfg := &Config{BootStrap: pair.server.bootstrap}
-	wait.Add(1)
-	go start(0, pair.server)
-	for i := 1; i < 256; i++ {
-		if node, err := New(cfg); err != nil {
-			t.Errorf("creating node #%d errored: %v", i, err)
-		} else {
-			defer node.Close()
-			wait.Add(1)
-			go start(i, node)
-		}
-	}
-	wait.Wait()
 
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
@@ -276,7 +376,7 @@ func TestSwarmQuery(t *testing.T) {
 		Target:  key[:],
 		Value:   updateVal,
 	}
-	if responses, err := CollectStream(pair.client.Update(ctx, &update, nil)); err != nil {
+	if responses, err := CollectStream(swarm.client.Update(ctx, &update, nil)); err != nil {
 		t.Error("update errored:", err)
 	} else if len(responses) != 20 {
 		t.Errorf("update received %d responses, expected 20", len(responses))
@@ -288,7 +388,7 @@ func TestSwarmQuery(t *testing.T) {
 		Command: "kv",
 		Target:  key[:],
 	}
-	stream := pair.client.Query(ctx, &query, nil)
+	stream := swarm.client.Query(ctx, &query, nil)
 	for resp := range stream.ResponseChan() {
 		if resp.Value != nil {
 			if !bytes.Equal(resp.Value, updateVal) {

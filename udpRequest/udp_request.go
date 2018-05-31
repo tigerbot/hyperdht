@@ -231,6 +231,13 @@ func (u *UDPRequest) Request(ctx context.Context, peer net.Addr, req []byte) ([]
 	}
 }
 
+// Pending returns the number of requests that have not yet completed.
+func (u *UDPRequest) Pending() int {
+	u.lock.RLock()
+	defer u.lock.RUnlock()
+	return len(u.pending)
+}
+
 func (u *UDPRequest) sendMessage(header int, msg []byte, addr net.Addr) error {
 	buf := make([]byte, len(msg)+2)
 	buf[0] = byte((header & 0xff00) >> 8)

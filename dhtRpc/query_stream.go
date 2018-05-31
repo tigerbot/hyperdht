@@ -152,10 +152,8 @@ func (s *QueryStream) drainLists(wait *sync.WaitGroup) {
 
 	var list *nodeList
 	for {
-		select {
-		case <-s.ctx.Done():
+		if s.ctx.Err() != nil {
 			return
-		default:
 		}
 
 		if s.committing {
@@ -204,12 +202,9 @@ func (s *QueryStream) send(node *queryNode, useToken bool) {
 		}
 	}
 
-	select {
-	case <-s.ctx.Done():
+	if s.ctx.Err() != nil {
 		return
-	default:
 	}
-
 	if err != nil {
 		// The node we were trying to reach might not have been in our list, but if it was it's
 		// a bad node and we don't want it in our list anymore.
