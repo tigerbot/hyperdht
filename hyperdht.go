@@ -8,6 +8,7 @@ import (
 	"net"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/pkg/errors"
 
 	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
 	"gitlab.daplie.com/core-sdk/hyperdht/peerEncoding"
@@ -21,34 +22,81 @@ const (
 	queryCmd = "peers"
 )
 
+// HyperDHT wraps a DHT RPC instance and handles the particular calls needed for peer
+// discovery. All methods that can be called on a dhtRpc.DHT instance can be called
+// on a HyperDHT instance even though it's not embedded publicly.
 type HyperDHT struct {
-	dht   *dhtRpc.DHT
+	*dht
 	store store
 }
+type dht = dhtRpc.DHT
 
-// Addr returns the network address the DHT is listening on.
-func (d *HyperDHT) Addr() net.Addr {
-	return d.dht.Addr()
+// OnQuery calls the OnQuery method for the underlying DHT RPC only if the command isn't
+// the one the hyperdht needs to function properly.
+func (d *HyperDHT) OnQuery(cmd string, handler dhtRpc.QueryHandler) {
+	if cmd != queryCmd {
+		d.dht.OnQuery(cmd, handler)
+	}
 }
 
-// Bootstrap bootstraps the underlying DHT RPC instance
-func (d *HyperDHT) Bootstrap(ctx context.Context) error {
-	return d.dht.Bootstrap(ctx)
+// OnUpdate calls the OnUpdate method for the underlying DHT RPC only if the command isn't
+// the one the hyperdht needs to function properly.
+func (d *HyperDHT) OnUpdate(cmd string, handler dhtRpc.QueryHandler) {
+	if cmd != queryCmd {
+		d.dht.OnUpdate(cmd, handler)
+	}
 }
 
-// Ping sends a ping query to the specified remote peer
-func (d *HyperDHT) Ping(ctx context.Context, peer net.Addr) (net.Addr, error) {
-	return d.dht.Ping(ctx, peer)
+func (d *HyperDHT) createStream(ctx context.Context, kind uint32, key []byte) *subStream {
+	req := &Request{
+		Type: &kind,
+	}
+	reqBuf, err := proto.Marshal(req)
+	if err != nil {
+		// Pretty sure this will never happen, so not worth making people check a return value.
+		panic(errors.WithMessage(err, "marshalling initial request buffer"))
+	}
+
+	query := &dhtRpc.Query{
+		Command: queryCmd,
+		Target:  key,
+		Value:   reqBuf,
+	}
+	switch kind {
+	case lookupType:
+		return d.dht.Query(ctx, query, nil)
+	case announceType:
+		return d.dht.Update(ctx, query, &dhtRpc.QueryOpts{Verbose: true})
+	case unannounceType:
+		return d.dht.Update(ctx, query, nil)
+	}
+	// Pretty sure this will never happen, so not worth making people check a return value.
+	panic(errors.Errorf("invalid stream type %d", kind))
 }
 
-// Holepunch uses the `referrer` node as a STUN server to UDP hole punch to the `peer`.
-func (d *HyperDHT) Holepunch(ctx context.Context, peer, referrer net.Addr) error {
-	return d.dht.Holepunch(ctx, peer, referrer)
+// Lookup finds peers that have been added to the DHT using the specified key.
+func (d *HyperDHT) Lookup(ctx context.Context, key []byte) *QueryStream {
+	stream := d.createStream(ctx, lookupType, key)
+	result := &QueryStream{stream, ctx, make(chan QueryResponse)}
+	go result.runMap()
+	return result
 }
 
-// Close closes the underlying DHT RPC instance
-func (d *HyperDHT) Close() error {
-	return d.dht.Close()
+// Announce adds this node to the DHT. Note that you should keep announcing yourself at
+// regular intervals (fx every 4-5 minutes).
+func (d *HyperDHT) Announce(ctx context.Context, key []byte) *QueryStream {
+	stream := d.createStream(ctx, announceType, key)
+	result := &QueryStream{stream, ctx, make(chan QueryResponse)}
+	go result.runMap()
+	return result
+}
+
+// Unannounce removes this node from the DHT.
+func (d *HyperDHT) Unannounce(ctx context.Context, key []byte) error {
+	stream := d.createStream(ctx, unannounceType, key)
+	for _ = range stream.ResponseChan() {
+	}
+	return <-stream.ErrorChan()
 }
 
 func (d *HyperDHT) onQuery(n dhtRpc.Node, q *dhtRpc.Query) ([]byte, error) {
@@ -141,4 +189,17 @@ func decodePeer(buf []byte) net.Addr {
 		return list[0].Addr()
 	}
 	return nil
+}
+
+func decodeAllPeers(buf []byte) []net.Addr {
+	list := peerEnc.Decode(buf)
+	if len(list) == 0 {
+		return nil
+	}
+
+	result := make([]net.Addr, len(list))
+	for i := range list {
+		result[i] = list[i].Addr()
+	}
+	return result
 }

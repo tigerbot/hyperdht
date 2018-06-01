@@ -63,7 +63,8 @@ type QueryStream struct {
 
 // ResponseChan returns the channel that can be used to access all responses from the remote peers
 // as they come in. The channel will be closed when the query is finished, so it is safe to range
-// over.
+// over. Also note that the query is back pressured by this channel, so it must be read from to
+// continue with the query.
 func (s *QueryStream) ResponseChan() <-chan QueryResponse { return s.respChan }
 
 // ErrorChan returns the channel that can be used to access any error encountered at the end of the
