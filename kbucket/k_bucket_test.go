@@ -16,6 +16,13 @@ func (c *testContact) copy() *testContact {
 	return &cp
 }
 
+type advancedContact struct {
+	id  []byte
+	msg string
+}
+
+func (c *advancedContact) ID() []byte { return c.id }
+
 func TestAdd(t *testing.T) {
 	bucket := New(nil)
 
@@ -45,6 +52,33 @@ func TestAdd(t *testing.T) {
 	bucket.Add(a)
 	if !reflect.DeepEqual(bucket.root.contacts, []Contact{b, a}) {
 		t.Fatal("root node contains wrong contact order after update")
+	}
+}
+
+func TestArbiter(t *testing.T) {
+	bucket := New(nil)
+
+	a1 := &advancedContact{id: []byte{'a'}, msg: "this is the first a"}
+	a2 := &advancedContact{id: []byte{'a'}, msg: "this is the second a"}
+	a3 := &advancedContact{id: []byte{'a'}, msg: "this won't ever be added"}
+
+	bucket.Arbiter(func(a, b Contact) Contact { return a })
+	bucket.Add(a1)
+	bucket.Add(a2)
+	if !reflect.DeepEqual(bucket.root.contacts, []Contact{a1}) {
+		t.Fatal("root node contains wrong contact after second add")
+	}
+
+	bucket.Arbiter(nil)
+	bucket.Add(a2)
+	if !reflect.DeepEqual(bucket.root.contacts, []Contact{a2}) {
+		t.Fatal("root node contains wrong contact after third add")
+	}
+
+	bucket.Arbiter(func(_, _ Contact) Contact { return a3 })
+	bucket.Add(a2)
+	if !reflect.DeepEqual(bucket.root.contacts, []Contact{a3}) {
+		t.Fatal("root node contains wrong contact after fourth add")
 	}
 }
 

@@ -152,6 +152,10 @@ func (u *UDPRequest) checkTimeouts(timeout time.Duration) {
 }
 
 func (u *UDPRequest) readMessages() {
+	// If we return it means the underlying socket is not working anymore so we need to make
+	// sure that we close properly so any pending and future requests are handled appropriately.
+	defer u.Close()
+
 	buf := make([]byte, 1<<16)
 	errCnt := 0
 	for {

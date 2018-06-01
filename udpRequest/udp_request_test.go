@@ -3,6 +3,8 @@ package udpRequest
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -52,10 +54,15 @@ func checkTimeoutErr(t *testing.T, sock *UDPRequest) {
 	}
 	if err == nil {
 		t.Error("got nil error from timed-out request")
-	} else if tErr, ok := err.(timeoutErr); !ok {
-		t.Error("got wrong error type for timed out request")
-	} else if !tErr.Temporary() || !tErr.Timeout() {
-		t.Error("timeout error did not indicate it was temporary and a timeout")
+	} else {
+		if !strings.Contains(err.Error(), "timed out") {
+			t.Errorf(`error message %q doesn't contain "timed out"`, err)
+		}
+		if tErr, ok := err.(timeoutErr); !ok {
+			t.Error("got wrong error type for timed out request")
+		} else if !tErr.Temporary() || !tErr.Timeout() {
+			t.Error("timeout error did not indicate it was temporary and a timeout")
+		}
 	}
 }
 
@@ -111,6 +118,17 @@ func TestTimeout(t *testing.T) {
 	sock := mustCreate(&Config{Timeout: 5 * time.Millisecond})
 	defer sock.Close()
 
+	if p := sock.Pending(); p != 0 {
+		t.Errorf("fresh socket has %d pending requests, expected 0", p)
+	} else {
+		go func() {
+			time.Sleep(time.Millisecond)
+			if p := sock.Pending(); p != 1 {
+				t.Errorf("socket has %d pending requests, expected 1", p)
+			}
+		}()
+	}
+
 	checkTimeoutErr(t, sock)
 }
 
@@ -162,4 +180,34 @@ func TestCleanup(t *testing.T) {
 	time.AfterFunc(5*time.Millisecond, func() { sock.Close() })
 	checkTimeoutErr(t, sock)
 	checkTimeoutErr(t, sock)
+}
+
+func TestConflict(t *testing.T) {
+	sock := mustCreate(&Config{Port: 7654})
+	defer sock.Close()
+
+	if sock, err := New(&Config{Port: 7654}); err == nil {
+		sock.Close()
+		t.Error("listening on port 7654 did not error the second time")
+	}
+}
+
+func TestBadPackets(t *testing.T) {
+	sock := mustCreate(nil)
+	defer sock.Close()
+	sock.SetHandler(&Echoer{sock: sock})
+
+	buf := make([]byte, 128)
+	if _, err := rand.Read(buf); err != nil {
+		t.Fatal("failed to create random buffer:", err)
+	}
+	t.Logf("random buffer: %x", buf)
+	for i := range buf {
+		if _, err := sock.socket.WriteTo(buf[:i+1], sock.Addr()); err != nil {
+			t.Errorf("error sending bad packet #%d: %v", i+1, err)
+		}
+	}
+
+	// socket should still work after receiving back packets
+	testEcho(t, sock, "hello world!", nil)
 }

@@ -29,11 +29,11 @@ func (d XORDistance) Closer(a, b []byte) bool {
 	}
 
 	// `a` and `b` are identical up to the shortest buffer we are dealing with, so return
-	// whichever one has length closest to the length of `d`. Default to `a` otherwise.
-	if (al-dl)*(al-dl) > (bl-dl)*(bl-dl) {
-		return false
+	// whichever one has length closest to the length of `d`.
+	if (al-dl)*(al-dl) < (bl-dl)*(bl-dl) {
+		return true
 	}
-	return true
+	return false
 }
 
 type distSorter struct {
