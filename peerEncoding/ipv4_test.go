@@ -60,16 +60,16 @@ func TestIPv4Encoder(t *testing.T) {
 	const enc = IPv4Encoder(2)
 
 	input := []Node{
-		basicNode{id: []byte{0x00, 0x00}, addr: customAddr("192.168.1.1:4278")},
-		basicNode{id: []byte{0x55, 0x55}, addr: customAddr("[::1]:7856")},
-		basicNode{id: []byte{0xcc, 0xcc}, addr: customAddr("10.10.10.1:31789")},
-		basicNode{id: []byte{0x00}, addr: customAddr("127.0.0.1:5897")},
+		BasicNode{MyID: []byte{0x00, 0x00}, MyAddr: customAddr("192.168.1.1:4278")},
+		BasicNode{MyID: []byte{0x55, 0x55}, MyAddr: customAddr("[::1]:7856")},
+		BasicNode{MyID: []byte{0xcc, 0xcc}, MyAddr: customAddr("10.10.10.1:31789")},
+		BasicNode{MyID: []byte{0x00}, MyAddr: customAddr("127.0.0.1:5897")},
 	}
 	output := enc.Decode(enc.Encode(input))
 
 	expected := []Node{
-		basicNode{id: []byte{0x00, 0x00}, addr: customAddr("192.168.1.1:4278")},
-		basicNode{id: []byte{0xcc, 0xcc}, addr: customAddr("10.10.10.1:31789")},
+		BasicNode{MyID: []byte{0x00, 0x00}, MyAddr: customAddr("192.168.1.1:4278")},
+		BasicNode{MyID: []byte{0xcc, 0xcc}, MyAddr: customAddr("10.10.10.1:31789")},
 	}
 	if len(output) != len(expected) {
 		t.Errorf("output has length %d, expected %d", len(output), len(expected))

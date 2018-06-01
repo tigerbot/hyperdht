@@ -11,13 +11,18 @@ type Node interface {
 	Addr() net.Addr
 }
 
-type basicNode struct {
-	id   []byte
-	addr net.Addr
+// BasicNode is a simple struct that implements the Node interface. It is also the type
+// used in the slice when decoding.
+type BasicNode struct {
+	MyID   []byte
+	MyAddr net.Addr
 }
 
-func (n basicNode) ID() []byte     { return n.id }
-func (n basicNode) Addr() net.Addr { return n.addr }
+// ID implements the Node interface
+func (n BasicNode) ID() []byte { return n.MyID }
+
+// Addr implements the Node interface
+func (n BasicNode) Addr() net.Addr { return n.MyAddr }
 
 func encodeIPv4Addr(peer net.Addr) []byte {
 	var host net.IP
@@ -94,9 +99,9 @@ func (e IPv4Encoder) Decode(buf []byte) []Node {
 	result := make([]Node, len(buf)/totalSize)
 	for i := range result {
 		start := i * totalSize
-		node := basicNode{id: make([]byte, idSize)}
-		copy(node.id, buf[start:start+idSize])
-		node.addr = decodeIPv4Addr(buf[start+idSize : start+totalSize])
+		node := BasicNode{MyID: make([]byte, idSize)}
+		copy(node.MyID, buf[start:start+idSize])
+		node.MyAddr = decodeIPv4Addr(buf[start+idSize : start+totalSize])
 		result[i] = node
 	}
 
