@@ -18,8 +18,8 @@ type basicNode struct {
 	addr net.Addr
 }
 
-func (n *basicNode) ID() []byte     { return n.id }
-func (n *basicNode) Addr() net.Addr { return n.addr }
+func (n basicNode) ID() []byte     { return n.id }
+func (n basicNode) Addr() net.Addr { return n.addr }
 
 type storedNode struct {
 	basicNode

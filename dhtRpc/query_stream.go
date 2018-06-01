@@ -228,7 +228,7 @@ func (s *QueryStream) send(node *queryNode, useToken bool) {
 
 	s.addClosest(node.addr, res)
 	if s.moveCloser {
-		for _, n := range decodeIPv4Nodes(res.GetNodes()) {
+		for _, n := range decodeNodes(res.GetNodes()) {
 			s.addPending(n, node.addr)
 		}
 	}
@@ -239,7 +239,7 @@ func (s *QueryStream) send(node *queryNode, useToken bool) {
 	}
 
 	queryRes := QueryResponse{
-		Node: &basicNode{
+		Node: basicNode{
 			id:   res.Id,
 			addr: node.addr,
 		},

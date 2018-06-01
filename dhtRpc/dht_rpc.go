@@ -243,13 +243,13 @@ func (d *DHT) forwardRequest(from *udpRequest.PeerRequest, req *Request) {
 		return
 	}
 
-	to := decodeIPv4Peer(req.ForwardRequest)
+	to := decodePeer(req.ForwardRequest)
 	if to == nil {
 		return
 	}
 
 	req.ForwardRequest = nil
-	req.ForwardResponse = encodeIPv4Peer(from.Addr)
+	req.ForwardResponse = encodePeer(from.Addr)
 	if buf, err := proto.Marshal(req); err == nil {
 		d.socket.ForwardRequest(from, to, buf)
 	}
@@ -259,7 +259,7 @@ func (d *DHT) forwardResponse(peer *udpRequest.PeerRequest, req *Request) *udpRe
 		return nil
 	}
 
-	to := decodeIPv4Peer(req.ForwardResponse)
+	to := decodePeer(req.ForwardResponse)
 	if to == nil {
 		return nil
 	}
@@ -300,7 +300,7 @@ func (d *DHT) onNodePing(current []kbucket.Contact, replacement kbucket.Contact)
 func (d *DHT) onPing(p *udpRequest.PeerRequest, req *Request) {
 	res := &Response{
 		Id:             d.queryID,
-		Value:          encodeIPv4Peer(p),
+		Value:          encodePeer(p),
 		RoundtripToken: d.makeToken(p),
 	}
 
@@ -315,7 +315,7 @@ func (d *DHT) onFindNode(p *udpRequest.PeerRequest, req *Request) {
 
 	res := &Response{
 		Id:             d.queryID,
-		Nodes:          encodeIPv4Nodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
+		Nodes:          encodeNodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
 		RoundtripToken: d.makeToken(p),
 	}
 
@@ -328,7 +328,7 @@ func (d *DHT) onQuery(p *udpRequest.PeerRequest, req *Request) {
 		return
 	}
 
-	node := &basicNode{
+	node := basicNode{
 		id:   req.Id,
 		addr: p.Addr,
 	}
@@ -363,7 +363,7 @@ func (d *DHT) onQuery(p *udpRequest.PeerRequest, req *Request) {
 	res := &Response{
 		Id:             d.queryID,
 		Value:          value,
-		Nodes:          encodeIPv4Nodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
+		Nodes:          encodeNodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
 		RoundtripToken: d.makeToken(p),
 	}
 
@@ -477,7 +477,7 @@ func (d *DHT) Ping(ctx context.Context, peer net.Addr) (net.Addr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if publicAddr := decodeIPv4Peer(res.GetValue()); publicAddr == nil {
+	if publicAddr := decodePeer(res.GetValue()); publicAddr != nil {
 		return publicAddr, nil
 	}
 	return nil, errors.New("response contained invalid address")
@@ -489,7 +489,7 @@ func (d *DHT) Holepunch(ctx context.Context, peer, referrer net.Addr) error {
 	req := &Request{
 		Command:        &cmd,
 		Id:             d.queryID,
-		ForwardRequest: encodeIPv4Peer(peer),
+		ForwardRequest: encodePeer(peer),
 	}
 	_, err := d.request(ctx, referrer, req)
 	return err
@@ -515,7 +515,8 @@ func (d *DHT) Update(ctx context.Context, q *Query, opts *QueryOpts) *QueryStrea
 }
 
 // Bootstrap finds the closest peers to the DHT's ID. Calling it before calling other queries
-// might make the queries faster, but it is not necessary.
+// might make the queries faster, but it is not necessary. This is particularly true if the
+// DHT is ephemeral and will only be used to make queries.
 //
 // Bootstrap should be called at regular intervals if you aren't doing any other queries.
 func (d *DHT) Bootstrap(ctx context.Context) error {

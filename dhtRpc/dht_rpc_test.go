@@ -246,7 +246,7 @@ func TestTargetedQuery(t *testing.T) {
 	addr := pair.server.Addr().(*net.UDPAddr)
 	addr.IP = net.IPv4(127, 0, 0, 1)
 	opts := &QueryOpts{
-		Nodes: []Node{&basicNode{id: pair.server.ID(), addr: addr}},
+		Nodes: []Node{basicNode{id: pair.server.ID(), addr: addr}},
 	}
 
 	testQuery(t, pair.client, false, &query, opts, []byte("world"))
@@ -289,7 +289,7 @@ func TestTargetedUpdate(t *testing.T) {
 	addr := pair.server.Addr().(*net.UDPAddr)
 	addr.IP = net.IPv4(127, 0, 0, 1)
 	opts := &QueryOpts{
-		Nodes: []Node{&basicNode{id: pair.server.ID(), addr: addr}},
+		Nodes: []Node{basicNode{id: pair.server.ID(), addr: addr}},
 	}
 
 	testQuery(t, pair.client, true, &update, opts, update.Value)
