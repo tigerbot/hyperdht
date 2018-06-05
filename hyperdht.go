@@ -109,7 +109,7 @@ func (d *HyperDHT) onRequest(n dhtRpc.Node, q *dhtRpc.Query, isUpdate bool) ([]b
 	var req Request
 	if err := proto.Unmarshal(q.Value, &req); err == nil {
 		if res := d.processPeers(&req, n.Addr(), q.Target, isUpdate); res != nil {
-			if resBuf, err := proto.Marshal(res); err != nil {
+			if resBuf, err := proto.Marshal(res); err == nil {
 				return resBuf, nil
 			}
 		}

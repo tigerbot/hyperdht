@@ -83,7 +83,7 @@ func TestStoreMultiple(t *testing.T) {
 	s.Put("test-key", "test-id-1", infos[1])
 	testStoreIterator(t, s.Iterator("test-key"), infos[:8]...)
 
-	for i := range infos {
+	for i := range infos[:6] {
 		update(i)
 	}
 	testStoreIterator(t, s.Iterator("test-key"), infos[:8]...)
