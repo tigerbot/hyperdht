@@ -179,24 +179,29 @@ func (d *DHT) onNodeUpdate(old, fresh kbucket.Contact) {
 	d.onNodeAdd(fresh)
 }
 
-func (d *DHT) makeToken(peer net.Addr) []byte {
+func (d *DHT) makeToken(peer net.Addr, cmd string) []byte {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
 
 	h := sha256.New()
 	h.Write(d.secrets[0])
 	h.Write([]byte(peer.String()))
+	h.Write([]byte(cmd))
 	return h.Sum(nil)
 }
-func (d *DHT) validToken(peer net.Addr, token []byte) bool {
+func (d *DHT) validToken(peer net.Addr, cmd string, token []byte) bool {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
 
 	h := sha256.New()
+	if len(token) != h.Size() {
+		return false
+	}
 	for _, s := range d.secrets {
 		h.Reset()
 		h.Write(s)
 		h.Write([]byte(peer.String()))
+		h.Write([]byte(cmd))
 		if bytes.Equal(h.Sum(nil), token) {
 			return true
 		}
@@ -299,9 +304,8 @@ func (d *DHT) onNodePing(current []kbucket.Contact, replacement kbucket.Contact)
 
 func (d *DHT) onPing(p *udpRequest.PeerRequest, req *Request) {
 	res := &Response{
-		Id:             d.queryID,
-		Value:          encodePeer(p),
-		RoundtripToken: d.makeToken(p),
+		Id:    d.queryID,
+		Value: encodePeer(p),
 	}
 
 	if buf, err := proto.Marshal(res); err == nil {
@@ -314,9 +318,8 @@ func (d *DHT) onFindNode(p *udpRequest.PeerRequest, req *Request) {
 	}
 
 	res := &Response{
-		Id:             d.queryID,
-		Nodes:          encodeNodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
-		RoundtripToken: d.makeToken(p),
+		Id:    d.queryID,
+		Nodes: encodeNodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
 	}
 
 	if buf, err := proto.Marshal(res); err == nil {
@@ -339,7 +342,9 @@ func (d *DHT) onQuery(p *udpRequest.PeerRequest, req *Request) {
 	}
 
 	var method string
-	if req.RoundtripToken != nil {
+	// I'm not sure what added benefit/security is added by having this token system, but the
+	// nodejs implementation uses it and we are trying to stay compatible with it.
+	if d.validToken(p, req.GetCommand(), req.RoundtripToken) {
 		method = "update"
 	} else {
 		method = "query"
@@ -364,7 +369,7 @@ func (d *DHT) onQuery(p *udpRequest.PeerRequest, req *Request) {
 		Id:             d.queryID,
 		Value:          value,
 		Nodes:          encodeNodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
-		RoundtripToken: d.makeToken(p),
+		RoundtripToken: d.makeToken(p, req.GetCommand()),
 	}
 
 	if buf, err := proto.Marshal(res); err == nil {
@@ -418,10 +423,6 @@ func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
 		return
 	}
 	d.addNode(p.Addr, req.Id)
-
-	if req.RoundtripToken != nil && !d.validToken(p, req.RoundtripToken) {
-		req.RoundtripToken = nil
-	}
 
 	if req.ForwardRequest != nil {
 		d.forwardRequest(p, req)
