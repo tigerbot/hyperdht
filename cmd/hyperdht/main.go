@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"os/signal"
@@ -17,10 +18,6 @@ import (
 
 	"gitlab.daplie.com/core-sdk/hyperdht"
 	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
-)
-
-const (
-	intervalDur = 4*time.Minute + time.Minute/2
 )
 
 type handler func(context.Context, *sync.WaitGroup, *hyperdht.HyperDHT, []byte)
@@ -74,10 +71,14 @@ func interruptCtx() context.Context {
 
 	return ctx
 }
+func randDuration() time.Duration {
+	part := time.Duration(rand.Int63n(int64(time.Minute)))
+	return 4*time.Minute + part
+}
 
 func normal(ctx context.Context, dht *hyperdht.HyperDHT) {
-	ticker := time.NewTicker(intervalDur)
-	defer ticker.Stop()
+	timer := time.NewTimer(randDuration())
+	defer timer.Stop()
 
 	run := func() {
 		if err := dht.Bootstrap(ctx); err != nil {
@@ -93,8 +94,9 @@ func normal(ctx context.Context, dht *hyperdht.HyperDHT) {
 		case <-ctx.Done():
 			return
 
-		case <-ticker.C:
+		case <-timer.C:
 			run()
+			timer.Reset(randDuration())
 		}
 	}
 }
@@ -102,8 +104,8 @@ func announce(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT,
 	if wait != nil {
 		defer wait.Done()
 	}
-	ticker := time.NewTicker(intervalDur)
-	defer ticker.Stop()
+	timer := time.NewTimer(randDuration())
+	defer timer.Stop()
 
 	run := func() {
 		stream := dht.Announce(ctx, key)
@@ -134,8 +136,9 @@ func announce(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT,
 		case <-ctx.Done():
 			return
 
-		case <-ticker.C:
+		case <-timer.C:
 			run()
+			timer.Reset(randDuration())
 		}
 	}
 }
@@ -186,9 +189,11 @@ func main() {
 	var bootstrap addrList
 	var ourKeys, queryKeys []string
 	var port int
+	var ephemeral bool
 
 	pflag.IntVarP(&port, "port", "p", 0, "the port to listen on")
 	pflag.VarP(&bootstrap, "bootstrap", "b", "the list of servers to contact initially")
+	pflag.BoolVar(&ephemeral, "ephemeral", false, "don't inform other peers of our ID")
 	pflag.StringArrayVarP(&ourKeys, "announce", "a", nil, "the list of keys to announce on")
 	pflag.StringArrayVarP(&queryKeys, "query", "q", nil, "the list of keys to query (incompatible with announce)")
 	pflag.Parse()
@@ -200,7 +205,7 @@ func main() {
 	cfg := dhtRpc.Config{
 		BootStrap: bootstrap,
 		Port:      port,
-		Ephemeral: len(queryKeys) > 0,
+		Ephemeral: ephemeral || len(queryKeys) > 0,
 	}
 	dht, err := hyperdht.New(&cfg)
 	if err != nil {
