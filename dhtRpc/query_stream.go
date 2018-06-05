@@ -95,42 +95,17 @@ func (s *QueryStream) CommitCnt() int {
 	return result
 }
 
-func (s *QueryStream) bootstap(peers []net.Addr) {
-	bg := func(addr net.Addr) {
-		node := new(queryNode)
-		node.addr = addr
-		s.send(node, false)
-
-		s.lock.Lock()
-		s.inflight--
-		s.cond.Broadcast()
-		s.lock.Unlock()
-	}
-
-	for i := range peers {
-		// We need to make sure the inflight value is incremented in this routine and not a
-		// sub routine. Otherwise we will have no guarantee it will be updated before the
-		// list drainers run and see no nodes pending and no requests in flight.
-		s.inflight++
-		go bg(peers[i])
-	}
-}
 func (s *QueryStream) spawnRoutines(concurrency int) {
 	var wait sync.WaitGroup
 	wait.Add(concurrency)
 
 	// We acquire the lock and check the inflight number before spawning the routines to make
 	// sure we don't spin up too fast when we need to bootstrap.
-	s.lock.Lock()
 	for i := 0; i < concurrency; i++ {
-		for s.inflight >= concurrency {
-			s.cond.Wait()
-		}
 		go s.drainLists(&wait)
 	}
-	s.lock.Unlock()
-
 	wait.Wait()
+
 	if err := s.ctx.Err(); err != nil {
 		s.errChan <- err
 	} else if s.respCnt == 0 {
@@ -227,6 +202,22 @@ func (s *QueryStream) send(node *queryNode, useToken bool) {
 		s.commitCnt++
 	}
 
+	// If we used a non-ephemeral node as a bootstrap try to make sure we don't re-query (assuming
+	// it's not already too late).
+	if node.id == nil && res.Id != nil {
+		if n := s.pending.get(res.Id); n != nil {
+			// If it's already in the list then all we can do it mark it as queried and hope it
+			// was actually still pending.
+			n.queried = true
+		} else {
+			// Otherwise we need to make a new copy of the node, and set its ID before adding.
+			// IMPORTANT: don't modify the original reference, it will screw up the sorting.
+			n := *node
+			n.id = res.Id
+			s.pending.insert(&n)
+		}
+	}
+
 	s.addClosest(node.addr, res)
 	if s.moveCloser {
 		for _, n := range decodeNodes(res.GetNodes()) {
@@ -252,6 +243,11 @@ func (s *QueryStream) send(node *queryNode, useToken bool) {
 	}
 }
 
+func (s *QueryStream) addBootstrap(addr net.Addr) {
+	qNode := new(queryNode)
+	qNode.addr = addr
+	s.pending.insert(qNode)
+}
 func (s *QueryStream) addPending(node Node, ref net.Addr) {
 	if node == nil || bytes.Equal(node.ID(), s.dht.id[:]) {
 		return
@@ -339,7 +335,9 @@ func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts
 		// bootstrapped at all yet, or our list has decayed (assuming that's even possible)
 		// and we need to bootstrap again.
 		if len(bootstrap) < len(dht.bootstrap) && len(bootstrap) < k {
-			result.bootstap(dht.bootstrap)
+			for _, addr := range dht.bootstrap {
+				result.addBootstrap(addr)
+			}
 		}
 	}
 	go result.spawnRoutines(opts.Concurrency)

@@ -6,11 +6,30 @@ import (
 	"crypto/sha256"
 	"net"
 	"reflect"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func localizeAddr(addr net.Addr) net.Addr {
+	var port int
+	if u, ok := addr.(*net.UDPAddr); ok {
+		port = u.Port
+	} else if t, ok := addr.(*net.TCPAddr); ok {
+		port = t.Port
+	} else if _, portStr, err := net.SplitHostPort(addr.String()); err != nil {
+		panic("invalid network address " + addr.String())
+	} else if port, err = strconv.Atoi(portStr); err != nil || port < 0 || port > (1<<16) {
+		panic("invalid network address " + addr.String())
+	}
+
+	return &net.UDPAddr{
+		IP:   net.IPv4(127, 0, 0, 1),
+		Port: port,
+	}
+}
 
 type dhtPair struct {
 	bootstrap *DHT
@@ -43,18 +62,15 @@ func createDHTPair() *dhtPair {
 		panic(err)
 	}
 
-	addr := result.bootstrap.Addr().(*net.UDPAddr)
-	addr.IP = net.IPv4(127, 0, 0, 1)
-	if result.server, err = New(&Config{BootStrap: []net.Addr{addr}}); err != nil {
-		panic(err)
-	}
-	if result.client, err = New(&Config{BootStrap: []net.Addr{addr}}); err != nil {
-		panic(err)
-	}
-
+	cfg := &Config{BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr())}}
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
-	if err = result.server.Bootstrap(ctx); err != nil {
+	if result.server, err = New(cfg); err != nil {
+		panic(err)
+	} else if err = result.server.Bootstrap(ctx); err != nil {
+		panic(err)
+	}
+	if result.client, err = New(cfg); err != nil {
 		panic(err)
 	}
 
@@ -94,9 +110,7 @@ func createSwarm(size int) *dhtSwarm {
 		panic(err)
 	}
 
-	addr := result.bootstrap.Addr().(*net.UDPAddr)
-	addr.IP = net.IPv4(127, 0, 0, 1)
-	cfg := &Config{BootStrap: []net.Addr{addr}}
+	cfg := &Config{BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr())}}
 
 	// We have a rather long timeout here for the race condition tests. With how many routines
 	// we spawn here it takes a lot of work for the race detector to do whatever it needs to do
@@ -395,5 +409,49 @@ func TestSwarmQuery(t *testing.T) {
 				t.Errorf("queried value %q doesn't match expected %q", resp.Value, updateVal)
 			}
 		}
+	}
+}
+
+func TestNonephemeralBootstrap(t *testing.T) {
+	var bootstrap, server, client *DHT
+	var err error
+	if bootstrap, err = New(nil); err != nil {
+		t.Fatal("failed creating bootstrap:", err)
+	}
+	defer bootstrap.Close()
+
+	cfg := &Config{BootStrap: []net.Addr{localizeAddr(bootstrap.Addr())}}
+	if server, err = New(cfg); err != nil {
+		t.Fatal("failed creating server:", err)
+	}
+	defer server.Close()
+	if client, err = New(cfg); err != nil {
+		t.Fatal("failed creating client:", err)
+	}
+	defer client.Close()
+
+	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	defer done()
+	if err = server.Bootstrap(ctx); err != nil {
+		t.Fatal("failed bootstrapping server:", err)
+	}
+
+	var count int32
+	bootstrap.OnQuery("query", func(_ Node, q *Query) ([]byte, error) {
+		atomic.AddInt32(&count, 1)
+		return nil, nil
+	})
+
+	query := Query{
+		Command: "query",
+		Target:  bootstrap.ID(),
+	}
+	if responses, err := CollectStream(client.Update(ctx, &query, nil)); err != nil {
+		t.Error("query errored:", err)
+	} else if len(responses) != 2 {
+		t.Errorf("update received %d responses, expected 2", len(responses))
+	}
+	if cnt := atomic.LoadInt32(&count); cnt != 1 {
+		t.Errorf("bootstrap query handler called %d times, expected 1", cnt)
 	}
 }

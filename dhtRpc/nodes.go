@@ -44,7 +44,7 @@ type nodeList struct {
 
 func (l *nodeList) get(id []byte) *queryNode {
 	for _, n := range l.list {
-		if bytes.Equal(id, n.id[:]) {
+		if bytes.Equal(id, n.id) {
 			return n
 		}
 	}
@@ -65,7 +65,7 @@ func (l *nodeList) insert(n *queryNode) {
 	if len(l.list) >= l.capacity && l.distCmp.Closer(l.list[len(l.list)-1].id, n.id) {
 		return
 	}
-	if l.get(n.id) != nil {
+	if n.id != nil && l.get(n.id) != nil {
 		return
 	}
 
