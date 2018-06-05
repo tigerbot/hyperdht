@@ -75,7 +75,7 @@ func (l *nodeList) insert(n *queryNode) {
 		l.list[len(l.list)-1] = n
 	}
 
-	for pos := len(l.list) - 1; pos > 0 && l.distCmp.Closer(l.list[pos-1].id, l.list[pos].id); pos-- {
+	for pos := len(l.list) - 1; pos > 0 && l.distCmp.Closer(l.list[pos].id, l.list[pos-1].id); pos-- {
 		l.list[pos-1], l.list[pos] = l.list[pos], l.list[pos-1]
 	}
 }
