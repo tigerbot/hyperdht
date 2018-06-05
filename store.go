@@ -66,7 +66,7 @@ func (s *store) Put(key, id string, val *peerInfo) {
 	}
 
 	s.values[fullKey] = &storedVal{
-		index:     len(s.lists),
+		index:     len(s.lists[key]),
 		timestamp: time.Now(),
 		value:     val,
 	}
@@ -103,10 +103,8 @@ func (s *store) Del(key, id string) {
 			s.prevLists[key] = list
 		} else {
 			delete(s.prevLists, key)
-			s.size--
 		}
 		delete(s.prevValues, fullKey)
-		s.size--
 	}
 }
 
