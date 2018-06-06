@@ -51,6 +51,7 @@ type QueryStream struct {
 	verbose    bool
 	committing bool
 
+	bootstrap  map[string]*queryNode
 	pending    nodeList
 	closest    nodeList
 	moveCloser bool
@@ -202,22 +203,6 @@ func (s *QueryStream) send(node *queryNode, useToken bool) {
 		s.commitCnt++
 	}
 
-	// If we used a non-ephemeral node as a bootstrap try to make sure we don't re-query (assuming
-	// it's not already too late).
-	if node.id == nil && res.Id != nil {
-		if n := s.pending.get(res.Id); n != nil {
-			// If it's already in the list then all we can do it mark it as queried and hope it
-			// was actually still pending.
-			n.queried = true
-		} else {
-			// Otherwise we need to make a new copy of the node, and set its ID before adding.
-			// IMPORTANT: don't modify the original reference, it will screw up the sorting.
-			n := *node
-			n.id = res.Id
-			s.pending.insert(&n)
-		}
-	}
-
 	s.addClosest(node.addr, res)
 	if s.moveCloser {
 		for _, n := range decodeNodes(res.GetNodes()) {
@@ -246,6 +231,7 @@ func (s *QueryStream) send(node *queryNode, useToken bool) {
 func (s *QueryStream) addBootstrap(addr net.Addr) {
 	qNode := new(queryNode)
 	qNode.addr = addr
+	s.bootstrap[addr.String()] = qNode
 	s.pending.insert(qNode)
 }
 func (s *QueryStream) addPending(node Node, ref net.Addr) {
@@ -260,6 +246,16 @@ func (s *QueryStream) addPending(node Node, ref net.Addr) {
 		},
 		referrer: ref,
 	}
+
+	// All of the bootstrap nodes were added without IDs, but they might not all be ephemeral.
+	// To avoid duplicating queries we check to see if any of our bootstrap nodes match the
+	// address of this node, and if so we mark it as queried if the bootstrap node was already
+	// queried. (And mark the bootstrap node as queried if it wasn't so the new node with the
+	// valid ID take priority over it.)
+	if b := s.bootstrap[node.Addr().String()]; b != nil {
+		qNode.queried, b.queried = b.queried, true
+	}
+
 	s.pending.insert(qNode)
 }
 func (s *QueryStream) addClosest(peer net.Addr, res *Response) {
@@ -335,6 +331,7 @@ func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts
 		// bootstrapped at all yet, or our list has decayed (assuming that's even possible)
 		// and we need to bootstrap again.
 		if len(bootstrap) < len(dht.bootstrap) && len(bootstrap) < k {
+			result.bootstrap = make(map[string]*queryNode, len(dht.bootstrap))
 			for _, addr := range dht.bootstrap {
 				result.addBootstrap(addr)
 			}

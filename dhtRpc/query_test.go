@@ -413,45 +413,37 @@ func TestSwarmQuery(t *testing.T) {
 }
 
 func TestNonephemeralBootstrap(t *testing.T) {
-	var bootstrap, server, client *DHT
-	var err error
-	if bootstrap, err = New(nil); err != nil {
-		t.Fatal("failed creating bootstrap:", err)
-	}
-	defer bootstrap.Close()
+	swarm := createSwarm(32)
+	defer swarm.Close()
 
-	cfg := &Config{BootStrap: []net.Addr{localizeAddr(bootstrap.Addr())}}
-	if server, err = New(cfg); err != nil {
-		t.Fatal("failed creating server:", err)
+	if nodes := swarm.client.Nodes(); len(nodes) > 0 {
+		t.Fatalf("client has already been bootstrapped:\n\t%#v", nodes)
 	}
-	defer server.Close()
-	if client, err = New(cfg); err != nil {
-		t.Fatal("failed creating client:", err)
+	swarm.client.bootstrap = make([]net.Addr, 20)
+	for i := range swarm.client.bootstrap {
+		swarm.client.bootstrap[i] = localizeAddr(swarm.servers[i].Addr())
 	}
-	defer client.Close()
+
+	for i, node := range swarm.servers {
+		num, id := i, node.ID()
+		var count int32
+		node.OnQuery("query", func(Node, *Query) ([]byte, error) {
+			if cnt := atomic.AddInt32(&count, 1); cnt > 1 {
+				t.Errorf("server #%d (%x) had query called %d times", num, id, cnt)
+			}
+			return nil, nil
+		})
+	}
 
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
-	if err = server.Bootstrap(ctx); err != nil {
-		t.Fatal("failed bootstrapping server:", err)
-	}
 
-	var count int32
-	bootstrap.OnQuery("query", func(_ Node, q *Query) ([]byte, error) {
-		atomic.AddInt32(&count, 1)
-		return nil, nil
-	})
-
+	key := sha256.Sum256([]byte("hello"))
 	query := Query{
 		Command: "query",
-		Target:  bootstrap.ID(),
+		Target:  key[:],
 	}
-	if responses, err := CollectStream(client.Update(ctx, &query, nil)); err != nil {
+	if _, err := CollectStream(swarm.client.Update(ctx, &query, nil)); err != nil {
 		t.Error("query errored:", err)
-	} else if len(responses) != 2 {
-		t.Errorf("update received %d responses, expected 2", len(responses))
-	}
-	if cnt := atomic.LoadInt32(&count); cnt != 1 {
-		t.Errorf("bootstrap query handler called %d times, expected 1", cnt)
 	}
 }
