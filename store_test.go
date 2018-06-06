@@ -35,7 +35,7 @@ func TestStoreBasics(t *testing.T) {
 	var s store
 	s.gc()
 
-	info := &peerInfo{[]byte("not actually a peer")}
+	info := &peerInfo{encoded: []byte("not actually a peer")}
 	s.Put("test-key", "test-id", info)
 	if !s.Has("test-key") {
 		t.Error("storage doesn't have key immediately after Put")
@@ -55,7 +55,7 @@ func TestStoreMultiple(t *testing.T) {
 
 	infos := make([]*peerInfo, 10)
 	update := func(ind int) {
-		infos[ind] = &peerInfo{make([]byte, 16)}
+		infos[ind] = &peerInfo{encoded: make([]byte, 16)}
 		if _, err := rand.Read(infos[ind].encoded); err != nil {
 			t.Fatal("errored reading 'randomness' into buffer", err)
 		}

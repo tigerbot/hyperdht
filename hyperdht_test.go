@@ -87,13 +87,13 @@ func TestHyperDHTBasic(t *testing.T) {
 
 	sum := sha256.Sum256([]byte("hello"))
 	key := sum[:]
-	if responses, err := CollectStream(pair.server.Announce(ctx, key)); err != nil {
+	if responses, err := CollectStream(pair.server.Announce(ctx, key, nil)); err != nil {
 		t.Fatal("error announcing:", err)
 	} else if len(responses) != 0 {
 		t.Errorf("announce received %d responses, expected 0\n\t%#v", len(responses), responses)
 	}
 
-	if responses, err := CollectStream(pair.client.Lookup(ctx, key)); err != nil {
+	if responses, err := CollectStream(pair.client.Lookup(ctx, key, nil)); err != nil {
 		t.Error("error looking up:", err)
 	} else if len(responses) != 1 {
 		t.Errorf("lookup received %d responses, expected 1\n\t%#v", len(responses), responses)
@@ -106,13 +106,81 @@ func TestHyperDHTBasic(t *testing.T) {
 		}
 	}
 
-	if err := pair.server.Unannounce(ctx, key); err != nil {
+	if err := pair.server.Unannounce(ctx, key, nil); err != nil {
 		t.Error("error unannouncing:", err)
 	}
 
-	if responses, err := CollectStream(pair.client.Lookup(ctx, key)); err != nil {
+	if responses, err := CollectStream(pair.client.Lookup(ctx, key, nil)); err != nil {
 		t.Error("error looking up:", err)
 	} else if len(responses) != 0 {
 		t.Errorf("second lookup received %d responses, expected 0\n\t%#v", len(responses), responses)
+	}
+}
+
+func TestHyperDHTLocal(t *testing.T) {
+	pair := createPair()
+	defer pair.Close()
+	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	defer done()
+
+	sum := sha256.Sum256([]byte("hello"))
+	key := sum[:]
+	serverAddr := &net.UDPAddr{IP: net.IPv4(192, 168, 1, 123), Port: 1234}
+	if responses, err := CollectStream(pair.server.Announce(ctx, key, &QueryOpts{LocalAddr: serverAddr})); err != nil {
+		t.Fatal("error announcing:", err)
+	} else if len(responses) != 0 {
+		t.Errorf("announce received %d responses, expected 0\n\t%#v", len(responses), responses)
+	}
+
+	if responses, err := CollectStream(pair.client.Lookup(ctx, key, nil)); err != nil {
+		t.Error("error looking up:", err)
+	} else if len(responses) != 1 {
+		t.Errorf("lookup received %d responses, expected 1\n\t%#v", len(responses), responses)
+	} else {
+		resp := responses[0]
+		if len(resp.Peers) != 1 {
+			t.Errorf("lookup resulted in %d peers, expected 1\n\t%#v", len(resp.Peers), resp.Peers)
+		} else if addr := localizeAddr(pair.server.Addr()); resp.Peers[0].String() != addr.String() {
+			t.Errorf("lookup returned peer %s, expected %s", resp.Peers[0], addr)
+		}
+		if len(resp.LocalPeers) != 0 {
+			t.Errorf("lookup without local addr resulted in %d local peers\n\t%#v", len(resp.LocalPeers), resp.LocalPeers)
+		}
+	}
+
+	clientAddr := &net.UDPAddr{IP: net.IPv4(192, 168, 1, 137), Port: 4321}
+	if responses, err := CollectStream(pair.client.Lookup(ctx, key, &QueryOpts{LocalAddr: clientAddr})); err != nil {
+		t.Error("error looking up:", err)
+	} else if len(responses) != 1 {
+		t.Errorf("lookup received %d responses, expected 1\n\t%#v", len(responses), responses)
+	} else {
+		resp := responses[0]
+		if len(resp.Peers) != 1 {
+			t.Errorf("lookup resulted in %d peers, expected 1\n\t%#v", len(resp.Peers), resp.Peers)
+		} else if addr := localizeAddr(pair.server.Addr()); resp.Peers[0].String() != addr.String() {
+			t.Errorf("lookup returned peer %s, expected %s", resp.Peers[0], addr)
+		}
+		if len(resp.LocalPeers) != 1 {
+			t.Errorf("lookup with contained local addr resulted in %d local peers\n\t%#v", len(resp.LocalPeers), resp.LocalPeers)
+		} else if resp.LocalPeers[0].String() != serverAddr.String() {
+			t.Errorf("lookup returned local address %s, expected %s", resp.LocalPeers[0], serverAddr)
+		}
+	}
+
+	clientAddr = &net.UDPAddr{IP: net.IPv4(10, 10, 0, 98), Port: 7531}
+	if responses, err := CollectStream(pair.client.Lookup(ctx, key, &QueryOpts{LocalAddr: clientAddr})); err != nil {
+		t.Error("error looking up:", err)
+	} else if len(responses) != 1 {
+		t.Errorf("lookup received %d responses, expected 1\n\t%#v", len(responses), responses)
+	} else {
+		resp := responses[0]
+		if len(resp.Peers) != 1 {
+			t.Errorf("lookup resulted in %d peers, expected 1\n\t%#v", len(resp.Peers), resp.Peers)
+		} else if addr := localizeAddr(pair.server.Addr()); resp.Peers[0].String() != addr.String() {
+			t.Errorf("lookup returned peer %s, expected %s", resp.Peers[0], addr)
+		}
+		if len(resp.LocalPeers) != 0 {
+			t.Errorf("lookup with non-contained local addr resulted in %d local peers\n\t%#v", len(resp.LocalPeers), resp.LocalPeers)
+		}
 	}
 }

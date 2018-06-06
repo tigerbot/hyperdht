@@ -28,6 +28,9 @@ type storedVal struct {
 
 type peerInfo struct {
 	encoded []byte
+
+	localPeer   []byte
+	localFilter []byte
 }
 
 func (s *store) Has(key string) bool {

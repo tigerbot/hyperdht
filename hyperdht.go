@@ -47,10 +47,14 @@ func (d *HyperDHT) OnUpdate(cmd string, handler dhtRpc.QueryHandler) {
 	}
 }
 
-func (d *HyperDHT) createStream(ctx context.Context, kind uint32, key []byte) *subStream {
+func (d *HyperDHT) createStream(ctx context.Context, kind uint32, key []byte, opts *QueryOpts) *subStream {
 	req := &Request{
 		Type: &kind,
 	}
+	if opts != nil {
+		req.LocalAddress = encodePeer(opts.LocalAddr)
+	}
+
 	reqBuf, err := proto.Marshal(req)
 	if err != nil {
 		// Pretty sure this will never happen, so not worth making people check a return value.
@@ -73,27 +77,32 @@ func (d *HyperDHT) createStream(ctx context.Context, kind uint32, key []byte) *s
 	// Pretty sure this will never happen, so not worth making people check a return value.
 	panic(errors.Errorf("invalid stream type %d", kind))
 }
+func (d *HyperDHT) createMappedStream(ctx context.Context, kind uint32, key []byte, opts *QueryOpts) *QueryStream {
+	var localAddr []byte
+	if opts != nil {
+		localAddr = encodePeer(opts.LocalAddr)
+	}
 
-// Lookup finds peers that have been added to the DHT using the specified key.
-func (d *HyperDHT) Lookup(ctx context.Context, key []byte) *QueryStream {
-	stream := d.createStream(ctx, lookupType, key)
-	result := &QueryStream{stream, ctx, make(chan QueryResponse)}
+	stream := d.createStream(ctx, kind, key, opts)
+	result := &QueryStream{stream, localAddr, ctx, make(chan QueryResponse)}
 	go result.runMap()
 	return result
+}
+
+// Lookup finds peers that have been added to the DHT using the specified key.
+func (d *HyperDHT) Lookup(ctx context.Context, key []byte, opts *QueryOpts) *QueryStream {
+	return d.createMappedStream(ctx, lookupType, key, opts)
 }
 
 // Announce adds this node to the DHT. Note that you should keep announcing yourself at
 // regular intervals (fx every 4-5 minutes).
-func (d *HyperDHT) Announce(ctx context.Context, key []byte) *QueryStream {
-	stream := d.createStream(ctx, announceType, key)
-	result := &QueryStream{stream, ctx, make(chan QueryResponse)}
-	go result.runMap()
-	return result
+func (d *HyperDHT) Announce(ctx context.Context, key []byte, opts *QueryOpts) *QueryStream {
+	return d.createMappedStream(ctx, announceType, key, opts)
 }
 
 // Unannounce removes this node from the DHT.
-func (d *HyperDHT) Unannounce(ctx context.Context, key []byte) error {
-	stream := d.createStream(ctx, unannounceType, key)
+func (d *HyperDHT) Unannounce(ctx context.Context, key []byte, opts *QueryOpts) error {
+	stream := d.createStream(ctx, unannounceType, key, opts)
 	for _ = range stream.ResponseChan() {
 	}
 	return <-stream.ErrorChan()
@@ -130,14 +139,19 @@ func (d *HyperDHT) processPeers(req *Request, from net.Addr, target []byte, isUp
 	}
 	if isUpdate && req.GetType() == announceType {
 		info := &peerInfo{encoded: peer}
+		if req.LocalAddress != nil && decodePeer(req.LocalAddress) != nil {
+			info.localFilter = req.LocalAddress[:2]
+			info.localPeer = req.LocalAddress[2:]
+		}
 
 		d.store.Put(key, id, info)
 	}
 
-	var peersBuf []byte
+	var peersBuf, localBuf []byte
 	next := d.store.Iterator(key)
+	filter := createLocalFilter(req.LocalAddress)
 
-	for len(peersBuf) < 900 {
+	for len(peersBuf)+len(localBuf) < 900 {
 		info := next()
 		if info == nil {
 			break
@@ -146,13 +160,17 @@ func (d *HyperDHT) processPeers(req *Request, from net.Addr, target []byte, isUp
 		}
 
 		peersBuf = append(peersBuf, info.encoded...)
+		if filter(info) {
+			localBuf = append(localBuf, info.localPeer...)
+		}
 	}
 
 	if peersBuf == nil {
 		return nil
 	}
 	return &Response{
-		Peers: peersBuf,
+		Peers:      peersBuf,
+		LocalPeers: localBuf,
 	}
 }
 
@@ -202,4 +220,36 @@ func decodeAllPeers(buf []byte) []net.Addr {
 		result[i] = list[i].Addr()
 	}
 	return result
+}
+func decodeLocalPeers(localAddr, buf []byte) []net.Addr {
+	if len(localAddr) != 6 || len(buf) == 0 || len(buf)%4 != 0 {
+		return nil
+	}
+
+	cp := make([]byte, 6)
+	copy(cp, localAddr[:2])
+	list := make([]net.Addr, len(buf)/4)
+	for i := range list {
+		cp = append(cp[:2], buf[4*i:4*(i+1)]...)
+		list[i] = decodePeer(cp)
+	}
+	return list
+}
+
+func createLocalFilter(localAddr []byte) func(*peerInfo) bool {
+	if len(localAddr) != 6 {
+		return func(*peerInfo) bool { return false }
+	}
+	return func(info *peerInfo) bool {
+		if info.localPeer == nil || info.localFilter == nil {
+			return false
+		}
+		if info.localFilter[0] != localAddr[0] || info.localFilter[1] != localAddr[1] {
+			return false
+		}
+		if bytes.Equal(localAddr[2:], info.localPeer) {
+			return false
+		}
+		return true
+	}
 }

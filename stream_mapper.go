@@ -9,12 +9,23 @@ import (
 	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
 )
 
+// QueryOpts contains all of the options that can be included in a Lookup or Announce query.
+type QueryOpts struct {
+	// LocalAddr is the address the service is listening on in the local network. If non-nil
+	// It will assume your CIDR is 16 and include any peers that announced being on a local
+	// address in the same subnet in the LocalPeers part of the response.
+	LocalAddr net.Addr
+}
+
 // QueryResponse contains the information about peers on the hyperdht.
 type QueryResponse struct {
 	// The node that gave this response.
 	Node net.Addr
 	// The addresses for all peers the node had stored for the key
 	Peers []net.Addr
+	// The addresses for all peers that are listening on a local address in the same subnet
+	// as the address that was provided in the QueryOpts (assuming CIDR of 16).
+	LocalPeers []net.Addr
 }
 
 type subStream = dhtRpc.QueryStream
@@ -25,6 +36,7 @@ type subStream = dhtRpc.QueryStream
 // to be called on this QueryStream even though it can't be directly accessed.
 type QueryStream struct {
 	*subStream
+	localAddr []byte
 
 	ctx      context.Context
 	respChan chan QueryResponse
@@ -50,8 +62,9 @@ func (s *QueryStream) runMap() {
 		}
 
 		qRes := QueryResponse{
-			Node:  rawRes.Node.Addr(),
-			Peers: peers,
+			Node:       rawRes.Node.Addr(),
+			Peers:      peers,
+			LocalPeers: decodeLocalPeers(s.localAddr, res.LocalPeers),
 		}
 		select {
 		case s.respChan <- qRes:
@@ -65,7 +78,7 @@ func (s *QueryStream) runMap() {
 // all responses written the the response channel and the final error.
 func CollectStream(stream *QueryStream) ([]QueryResponse, error) {
 	var responses []QueryResponse
-	for resp := range stream.respChan {
+	for resp := range stream.ResponseChan() {
 		responses = append(responses, resp)
 	}
 	return responses, <-stream.ErrorChan()
