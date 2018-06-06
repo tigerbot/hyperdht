@@ -184,3 +184,31 @@ func TestHyperDHTLocal(t *testing.T) {
 		}
 	}
 }
+
+func TestPortOverride(t *testing.T) {
+	pair := createPair()
+	defer pair.Close()
+	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	defer done()
+
+	sum := sha256.Sum256([]byte("hello"))
+	key := sum[:]
+	if responses, err := CollectStream(pair.server.Announce(ctx, key, &QueryOpts{Port: 4321})); err != nil {
+		t.Fatal("error announcing:", err)
+	} else if len(responses) != 0 {
+		t.Errorf("announce received %d responses, expected 0\n\t%#v", len(responses), responses)
+	}
+
+	if responses, err := CollectStream(pair.client.Lookup(ctx, key, nil)); err != nil {
+		t.Error("error looking up:", err)
+	} else if len(responses) != 1 {
+		t.Errorf("lookup received %d responses, expected 1\n\t%#v", len(responses), responses)
+	} else {
+		resp := responses[0]
+		if len(resp.Peers) != 1 {
+			t.Errorf("lookup resulted in %d peers, expected 1\n\t%#v", len(resp.Peers), resp.Peers)
+		} else if resp.Peers[0].String() != "127.0.0.1:4321" {
+			t.Errorf("lookup returned peer %s, expected 127.0.0.1:4321", resp.Peers[0])
+		}
+	}
+}

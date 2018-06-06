@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"net"
+	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
@@ -53,6 +54,9 @@ func (d *HyperDHT) createStream(ctx context.Context, kind uint32, key []byte, op
 	}
 	if opts != nil {
 		req.LocalAddress = encodePeer(opts.LocalAddr)
+		if port := uint32(opts.Port); port != 0 {
+			req.Port = &port
+		}
 	}
 
 	reqBuf, err := proto.Marshal(req)
@@ -130,6 +134,9 @@ func (d *HyperDHT) onRequest(n dhtRpc.Node, q *dhtRpc.Query, isUpdate bool) ([]b
 }
 
 func (d *HyperDHT) processPeers(req *Request, from net.Addr, target []byte, isUpdate bool) *Response {
+	if port := req.GetPort(); port != 0 {
+		from = overridePort(from, int(port))
+	}
 	key, id := hex.EncodeToString(target), from.String()
 	peer := encodePeer(from)
 
@@ -251,5 +258,24 @@ func createLocalFilter(localAddr []byte) func(*peerInfo) bool {
 			return false
 		}
 		return true
+	}
+}
+
+type alteredAddr struct {
+	network string
+	address string
+}
+
+func (a *alteredAddr) Network() string { return a.network }
+func (a *alteredAddr) String() string  { return a.address }
+
+func overridePort(addr net.Addr, port int) net.Addr {
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return addr
+	}
+	return &alteredAddr{
+		network: addr.Network(),
+		address: net.JoinHostPort(host, strconv.Itoa(port)),
 	}
 }

@@ -12,9 +12,13 @@ import (
 // QueryOpts contains all of the options that can be included in a Lookup or Announce query.
 type QueryOpts struct {
 	// LocalAddr is the address the service is listening on in the local network. If non-nil
-	// It will assume your CIDR is 16 and include any peers that announced being on a local
+	// it will assume your CIDR is 16 and include any peers that announced being on a local
 	// address in the same subnet in the LocalPeers part of the response.
 	LocalAddr net.Addr
+
+	// Specifying a non-zero port will tell the remote peers to store an address using this
+	// port instead of the one they see.
+	Port int
 }
 
 // QueryResponse contains the information about peers on the hyperdht.
