@@ -108,7 +108,7 @@ func announce(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT,
 	defer timer.Stop()
 
 	run := func() {
-		stream := dht.Announce(ctx, key)
+		stream := dht.Announce(ctx, key, nil)
 		for _ = range stream.ResponseChan() {
 		}
 		if err := <-stream.ErrorChan(); err != nil {
@@ -122,7 +122,7 @@ func announce(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT,
 		// a new context that has a limited lifetime.
 		ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
 		defer done()
-		if err := dht.Unannounce(ctx, key); err != nil {
+		if err := dht.Unannounce(ctx, key, nil); err != nil {
 			log.Printf("encountered error unannouncing %x: %v\n", key, err)
 		} else {
 			log.Printf("unannounced %x\n", key)
@@ -147,7 +147,7 @@ func query(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT, ke
 		defer wait.Done()
 	}
 
-	stream := dht.Lookup(ctx, key)
+	stream := dht.Lookup(ctx, key, nil)
 	var respCnt int
 	for resp := range stream.ResponseChan() {
 		log.Printf("%x from %s\n", key, resp.Node)
