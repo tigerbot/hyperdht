@@ -61,10 +61,8 @@ type DHT struct {
 	secrets  [secretCnt][]byte
 	handlers map[string]QueryHandler
 
-	tick   uint64
-	top    *storedNode
-	bottom *storedNode
-	nodes  *kbucket.KBucket
+	tick  uint64
+	nodes storedNodeList
 
 	socket *udpRequest.UDPRequest
 	done   chan struct{}
@@ -105,19 +103,16 @@ func (d *DHT) updateTick() {
 
 		case <-ticker.C:
 			if tick := atomic.AddUint64(&d.tick, 1); tick&7 == 0 {
-				d.pingSome()
+				d.pingSome(tick)
 			}
 		}
 	}
 }
-func (d *DHT) pingSome() {
-	curTick := d.tick
-	oldest := d.bottom
-	for i := 0; i < 3 && oldest != nil; i++ {
-		if curTick-oldest.tick >= 3 {
-			go d.check(oldest)
+func (d *DHT) pingSome(curTick uint64) {
+	for _, n := range d.nodes.oldest(3) {
+		if curTick-atomic.LoadUint64(&n.tick) >= 3 {
+			go d.check(n)
 		}
-		oldest = oldest.next
 	}
 }
 func (d *DHT) check(n *storedNode) bool {
@@ -128,55 +123,6 @@ func (d *DHT) check(n *storedNode) bool {
 	// We shouldn't need to update the node when the ping succeeds because that should
 	// already be happening elsewhere every time any type of request succeeds.
 	return true
-}
-
-// onNodeAdd, onNodeRemove, and onNodeUpdate all handle changes in the kbucket storage so we can
-// maintain a list of all nodes sorted by last contact time (instead of sorted by distance to
-// our ID and then last contact time). We use this list to periodically ping the oldest nodes.
-func (d *DHT) onNodeAdd(c kbucket.Contact) {
-	n, ok := c.(*storedNode)
-	if !ok {
-		d.nodes.Remove(c.ID())
-		return
-	}
-
-	if d.top == nil && d.bottom == nil {
-		d.top, d.bottom = n, n
-		n.prev, n.next = nil, nil
-	} else {
-		n.prev, n.next = d.top, nil
-		d.top.next = n
-		d.top = n
-	}
-}
-func (d *DHT) onNodeRemove(c kbucket.Contact) {
-	n, ok := c.(*storedNode)
-	if !ok {
-		return
-	}
-
-	if d.bottom != n && d.top != n {
-		n.prev.next = n.next
-		n.next.prev = n.prev
-	} else {
-		if d.bottom == n {
-			d.bottom = n.next
-			if d.bottom != nil {
-				d.bottom.prev = nil
-			}
-		}
-		if d.top == n {
-			d.top = n.prev
-			if d.top != nil {
-				d.top.next = nil
-			}
-		}
-	}
-	n.next, n.prev = nil, nil
-}
-func (d *DHT) onNodeUpdate(old, fresh kbucket.Contact) {
-	d.onNodeRemove(old)
-	d.onNodeAdd(fresh)
 }
 
 func (d *DHT) makeToken(peer net.Addr, cmd string) []byte {
@@ -573,14 +519,7 @@ func New(cfg *Config) (*DHT, error) {
 	if !c.Ephemeral {
 		result.queryID = result.id[:]
 	}
-	result.nodes = kbucket.New(&kbucket.Config{
-		LocalID: result.id[:],
-		OnPing:  result.onNodePing,
-
-		OnAdd:    result.onNodeAdd,
-		OnRemove: result.onNodeRemove,
-		OnUpdate: result.onNodeUpdate,
-	})
+	result.nodes.init(result.id[:], result.onNodePing)
 
 	for i := range result.secrets {
 		result.secrets[i] = make([]byte, secretSize)

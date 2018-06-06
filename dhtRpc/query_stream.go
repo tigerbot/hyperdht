@@ -52,8 +52,8 @@ type QueryStream struct {
 	committing bool
 
 	bootstrap  map[string]*queryNode
-	pending    nodeList
-	closest    nodeList
+	pending    queryNodeList
+	closest    queryNodeList
 	moveCloser bool
 	holepunch  bool
 
@@ -127,7 +127,7 @@ func (s *QueryStream) drainLists(wait *sync.WaitGroup) {
 	// that reason for themselves and also exit.
 	defer s.cond.Broadcast()
 
-	var list *nodeList
+	var list *queryNodeList
 	for {
 		if s.ctx.Err() != nil {
 			return
@@ -301,8 +301,8 @@ func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts
 		verbose:    opts.Verbose,
 		committing: false,
 
-		pending:    nodeList{k, kbucket.XORDistance(query.Target), nil},
-		closest:    nodeList{k, kbucket.XORDistance(query.Target), nil},
+		pending:    queryNodeList{k, kbucket.XORDistance(query.Target), nil},
+		closest:    queryNodeList{k, kbucket.XORDistance(query.Target), nil},
 		moveCloser: len(opts.Nodes) == 0,
 		holepunch:  !opts.DisableHolepunching,
 

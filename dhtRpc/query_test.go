@@ -115,7 +115,7 @@ func createSwarm(size int) *dhtSwarm {
 	// We have a rather long timeout here for the race condition tests. With how many routines
 	// we spawn here it takes a lot of work for the race detector to do whatever it needs to do
 	// to detect the races, so we allow it plenty of time. Normal tests Shouldn't take that long.
-	ctx, done := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, done := context.WithTimeout(context.Background(), time.Minute)
 	defer done()
 	var wait sync.WaitGroup
 	start := func(node *DHT) {
