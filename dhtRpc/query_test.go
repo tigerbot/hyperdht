@@ -309,7 +309,7 @@ func TestTargetedUpdate(t *testing.T) {
 	testQuery(t, pair.client, true, &update, opts, update.Value)
 }
 
-func TestRateLimit(t *testing.T) {
+func TestDHTRateLimit(t *testing.T) {
 	// We need a swarm so the query stream has more than one peer to query at a time.
 	swarm := createSwarm(128)
 	defer swarm.Close()
@@ -356,6 +356,55 @@ func TestRateLimit(t *testing.T) {
 		case <-ticker.C:
 			if cur, limit := swarm.client.socket.Pending(), swarm.client.concurrency; cur > limit {
 				t.Fatalf("DHT currently has %d requests pending, expected <= %d", cur, limit)
+			} else {
+				counts = append(counts, cur)
+			}
+		}
+	}
+}
+
+func TestQueryRateLimit(t *testing.T) {
+	// We need a swarm so the query stream has more than one peer to query at a time.
+	swarm := createSwarm(128)
+	defer swarm.Close()
+	for _, s := range swarm.servers {
+		s.OnQuery("", func(Node, *Query) ([]byte, error) {
+			time.Sleep(time.Millisecond)
+			return []byte("world"), nil
+		})
+	}
+
+	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	defer done()
+	streamFinished := make(chan bool)
+
+	const concurrency = 2
+	go func() {
+		defer func() { streamFinished <- true }()
+
+		query := Query{Command: "hello", Target: swarm.servers[0].ID()}
+		opts := QueryOpts{Concurrency: concurrency}
+		stream := swarm.client.Query(ctx, &query, &opts)
+		// ResponseChan must be drained or it will back pressure the query.
+		for _ = range stream.ResponseChan() {
+		}
+		if err := <-stream.ErrorChan(); err != nil {
+			t.Errorf("backgrounded query errored: %v", err)
+		}
+	}()
+
+	ticker := time.NewTicker(time.Millisecond / 4)
+	defer ticker.Stop()
+	var counts []int
+	for {
+		select {
+		case <-streamFinished:
+			t.Log(counts)
+			return
+
+		case <-ticker.C:
+			if cur := swarm.client.socket.Pending(); cur > concurrency {
+				t.Fatalf("DHT currently has %d requests pending, expected <= %d", cur, concurrency)
 			} else {
 				counts = append(counts, cur)
 			}

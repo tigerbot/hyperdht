@@ -5,6 +5,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"github.com/pkg/errors"
 	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
@@ -37,19 +38,15 @@ type QueryOpts struct {
 // A QueryStream holds all of the context needed to make queries or updates to remote peers.
 type QueryStream struct {
 	ctx   context.Context
+	lock  sync.Mutex
 	dht   *DHT
 	query *Query
 
-	lock     sync.Mutex
-	cond     sync.Cond
-	inflight int
-
-	respCnt   int
-	commitCnt int
-
-	isUpdate   bool
-	verbose    bool
-	committing bool
+	concurrency int32
+	respCnt     int
+	commitCnt   int
+	isUpdate    bool
+	verbose     bool
 
 	bootstrap  map[string]*queryNode
 	pending    queryNodeList
@@ -96,79 +93,70 @@ func (s *QueryStream) CommitCnt() int {
 	return result
 }
 
-func (s *QueryStream) spawnRoutines(concurrency int) {
-	var wait sync.WaitGroup
-	wait.Add(concurrency)
+func (s *QueryStream) runStream() {
+	atomic.AddInt32(&s.dht.inflightQueries, 1)
+	defer atomic.AddInt32(&s.dht.inflightQueries, -1)
 
-	// We acquire the lock and check the inflight number before spawning the routines to make
-	// sure we don't spin up too fast when we need to bootstrap.
-	for i := 0; i < concurrency; i++ {
-		go s.drainLists(&wait)
-	}
-	wait.Wait()
-
-	if err := s.ctx.Err(); err != nil {
-		s.errChan <- err
-	} else if s.respCnt == 0 {
-		s.errChan <- errors.New("no nodes responded")
-	} else if s.committing && s.commitCnt == 0 {
-		s.errChan <- errors.New("no close node responded to update")
-	} else {
-		s.errChan <- nil
-	}
-	close(s.respChan)
-}
-
-func (s *QueryStream) drainLists(wait *sync.WaitGroup) {
-	defer wait.Done()
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	// Make sure that if we have a reason to exit that all other routines can wake up to see
-	// that reason for themselves and also exit.
-	defer s.cond.Broadcast()
+	cond := sync.Cond{L: &s.lock}
 
-	var list *queryNodeList
-	for {
-		if s.ctx.Err() != nil {
-			return
-		}
-
-		if s.committing {
-			list = &s.closest
+	var committing bool
+	defer func() {
+		if err := s.ctx.Err(); err != nil {
+			s.errChan <- err
+		} else if s.respCnt == 0 {
+			s.errChan <- errors.New("no nodes responded")
+		} else if committing && s.commitCnt == 0 {
+			s.errChan <- errors.New("no close node responded to update")
 		} else {
-			list = &s.pending
+			s.errChan <- nil
+		}
+		close(s.respChan)
+	}()
+
+	var inflight int32
+	send := func(node *queryNode) {
+		s.send(node, committing)
+		atomic.AddInt32(&inflight, -1)
+		cond.Broadcast()
+	}
+
+	list := &s.pending
+	for {
+		for atomic.LoadInt32(&inflight) >= atomic.LoadInt32(&s.concurrency) {
+			cond.Wait()
+		}
+		if s.ctx.Err() != nil {
+			for atomic.LoadInt32(&inflight) > 0 {
+				cond.Wait()
+			}
+			return
 		}
 
 		if node := list.getUnqueried(); node != nil {
 			node.queried = true
-			s.inflight++
-			s.lock.Unlock()
-			s.send(node, s.committing)
-			s.lock.Lock()
-			s.inflight--
-			// We might have just added multiple pending nodes, so wake everyone up to check.
-			s.cond.Broadcast()
-		} else if s.inflight > 0 {
-			s.cond.Wait()
-		} else if s.isUpdate && !s.committing {
-			s.committing = true
-			// We've just switched lists, so we should have a fresh batch of work for all
-			// the other routines to help out with.
-			s.cond.Broadcast()
+			go send(node)
+			atomic.AddInt32(&inflight, 1)
+		} else if atomic.LoadInt32(&inflight) > 0 {
+			cond.Wait()
+		} else if s.isUpdate && !committing {
+			committing = true
+			list = &s.closest
 		} else {
 			return
 		}
 	}
 }
 
-func (s *QueryStream) send(node *queryNode, useToken bool) {
+func (s *QueryStream) send(node *queryNode, isUpdate bool) {
 	req := &Request{
 		Command: &s.query.Command,
 		Id:      s.dht.queryID,
 		Target:  s.query.Target,
 		Value:   s.query.Value,
 	}
-	if useToken {
+	if isUpdate {
 		req.RoundtripToken = node.roundTripToken
 	}
 
@@ -199,7 +187,7 @@ func (s *QueryStream) send(node *queryNode, useToken bool) {
 
 	s.lock.Lock()
 	s.respCnt++
-	if s.committing {
+	if isUpdate {
 		s.commitCnt++
 	}
 
@@ -211,7 +199,7 @@ func (s *QueryStream) send(node *queryNode, useToken bool) {
 	}
 	s.lock.Unlock()
 
-	if len(res.Id) != IDSize || (s.isUpdate && !s.committing && !s.verbose) {
+	if len(res.Id) != IDSize || (s.isUpdate && !isUpdate && !s.verbose) {
 		return
 	}
 
@@ -297,9 +285,9 @@ func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts
 		dht:   dht,
 		query: query,
 
-		isUpdate:   opts.isUpdate,
-		verbose:    opts.Verbose,
-		committing: false,
+		concurrency: int32(opts.Concurrency),
+		isUpdate:    opts.isUpdate,
+		verbose:     opts.Verbose,
 
 		pending:    queryNodeList{k, kbucket.XORDistance(query.Target), nil},
 		closest:    queryNodeList{k, kbucket.XORDistance(query.Target), nil},
@@ -310,7 +298,6 @@ func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts
 		errChan:  make(chan error, 1),
 		warnChan: make(chan error),
 	}
-	result.cond.L = &result.lock
 
 	if len(opts.Nodes) > 0 {
 		// Make sure the lists are big enough to fit all the nodes we are told to query.
@@ -337,7 +324,7 @@ func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts
 			}
 		}
 	}
-	go result.spawnRoutines(opts.Concurrency)
+	go result.runStream()
 
 	return result
 }
@@ -346,8 +333,8 @@ func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts
 // all responses written the the response channel and the final error.
 func CollectStream(stream *QueryStream) ([]QueryResponse, error) {
 	var responses []QueryResponse
-	for resp := range stream.respChan {
+	for resp := range stream.ResponseChan() {
 		responses = append(responses, resp)
 	}
-	return responses, <-stream.errChan
+	return responses, <-stream.ErrorChan()
 }

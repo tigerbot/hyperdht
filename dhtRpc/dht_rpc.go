@@ -49,11 +49,13 @@ type Config struct {
 
 // A DHT holds everything needed to send RPC calls over a distributed hash table.
 type DHT struct {
-	id          [IDSize]byte
-	queryID     []byte
-	concurrency int
-	rateLimiter chan bool
-	bootstrap   []net.Addr
+	id        [IDSize]byte
+	queryID   []byte
+	bootstrap []net.Addr
+
+	concurrency     int
+	inflightQueries int32
+	rateLimiter     chan bool
 
 	// secrets and handlers have nothing in common except that they need to be thread safe and
 	// will change very rarely compared to how often they are used, so they share an RWLock
@@ -109,7 +111,12 @@ func (d *DHT) updateTick() {
 	}
 }
 func (d *DHT) pingSome(curTick uint64) {
-	for _, n := range d.nodes.oldest(3) {
+	count := 3
+	if atomic.LoadInt32(&d.inflightQueries) > 2 {
+		count = 1
+	}
+
+	for _, n := range d.nodes.oldest(count) {
 		if curTick-atomic.LoadUint64(&n.tick) >= 3 {
 			go d.check(n)
 		}
@@ -467,10 +474,27 @@ func (d *DHT) Update(ctx context.Context, q *Query, opts *QueryOpts) *QueryStrea
 //
 // Bootstrap should be called at regular intervals if you aren't doing any other queries.
 func (d *DHT) Bootstrap(ctx context.Context) error {
-	stream := d.Query(ctx, &Query{Command: "_find_node", Target: d.id[:]}, nil)
-	// We don't use CollectStream here because we don't want to store all of the reponses in
-	// memory when we don't have to.
+	fgCon, bgCon := int32(d.concurrency), int32(2)
+	if fgCon > 16 {
+		bgCon = fgCon / 8
+	} else if fgCon < 2 {
+		bgCon = fgCon
+	}
+	var opts *QueryOpts
+	if atomic.LoadInt32(&d.inflightQueries) > 0 {
+		opts = &QueryOpts{Concurrency: int(bgCon)}
+	}
+
+	stream := d.Query(ctx, &Query{Command: "_find_node", Target: d.id[:]}, opts)
+	// Bootstrapping is lower priority than most other queries, so if there are other queries
+	// active then we lower the number of requests our query can make at a time to avoid hogging
+	// the total number of requests that can be pending.
 	for _ = range stream.respChan {
+		if atomic.LoadInt32(&d.inflightQueries) == 1 {
+			atomic.StoreInt32(&stream.concurrency, fgCon)
+		} else {
+			atomic.StoreInt32(&stream.concurrency, bgCon)
+		}
 	}
 	return <-stream.errChan
 }
