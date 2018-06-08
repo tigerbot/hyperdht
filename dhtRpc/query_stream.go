@@ -7,7 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/pkg/errors"
 	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
 )
 
@@ -59,6 +58,12 @@ type QueryStream struct {
 	warnChan chan error
 }
 
+type noResponseErr string
+
+func (e noResponseErr) Error() string   { return string(e) }
+func (e noResponseErr) Temporary() bool { return true }
+func (e noResponseErr) Timeout() bool   { return true }
+
 // ResponseChan returns the channel that can be used to access all responses from the remote peers
 // as they come in. The channel will be closed when the query is finished, so it is safe to range
 // over. Also note that the query is back pressured by this channel, so it must be read from to
@@ -106,9 +111,9 @@ func (s *QueryStream) runStream() {
 		if err := s.ctx.Err(); err != nil {
 			s.errChan <- err
 		} else if s.respCnt == 0 {
-			s.errChan <- errors.New("no nodes responded")
+			s.errChan <- noResponseErr("no nodes responded")
 		} else if committing && s.commitCnt == 0 {
-			s.errChan <- errors.New("no close node responded to update")
+			s.errChan <- noResponseErr("no close node responded to update")
 		} else {
 			s.errChan <- nil
 		}

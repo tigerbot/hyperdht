@@ -41,6 +41,7 @@ type Config struct {
 	Ephemeral   bool
 	Concurrency int
 	BootStrap   []net.Addr
+	Nodes       []Node
 
 	// Allows for custom socket types or instances to be used. If Socket is nil a new net.UDPConn
 	// is created that will listen on the specified port.
@@ -535,6 +536,9 @@ func New(cfg *Config) (*DHT, error) {
 		result.queryID = result.id[:]
 	}
 	result.nodes.init(result.id[:], result.onNodePing)
+	for _, node := range c.Nodes {
+		result.addNode(node.Addr(), node.ID())
+	}
 
 	for i := range result.secrets {
 		result.secrets[i] = make([]byte, secretSize)
@@ -544,6 +548,8 @@ func New(cfg *Config) (*DHT, error) {
 	}
 	result.handlers = make(map[string]QueryHandler)
 
+	// This should be the last step that can fail since it would otherwise have to be closed
+	// if there were any other errors.
 	result.socket, err = udpRequest.New(&udpRequest.Config{
 		Socket: c.Socket,
 		Port:   c.Port,
