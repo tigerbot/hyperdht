@@ -108,10 +108,7 @@ func announce(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT,
 	defer timer.Stop()
 
 	run := func() {
-		stream := dht.Announce(ctx, key, nil)
-		for _ = range stream.ResponseChan() {
-		}
-		if err := <-stream.ErrorChan(); err != nil {
+		if err := dht.AnnounceDiscard(ctx, key, nil); err != nil {
 			log.Printf("encountered error announcing %x: %v\n", key, err)
 		} else {
 			log.Printf("announced %x...\n", key)

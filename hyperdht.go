@@ -104,12 +104,16 @@ func (d *HyperDHT) Announce(ctx context.Context, key []byte, opts *QueryOpts) *Q
 	return d.createMappedStream(ctx, announceType, key, opts)
 }
 
+// AnnounceDiscard is similar to Announce, except that it will block until the entire update
+// is complete and will discard all responses from the peers instead of processing and converting
+// them to the response type of this package.
+func (d *HyperDHT) AnnounceDiscard(ctx context.Context, key []byte, opts *QueryOpts) error {
+	return dhtRpc.DiscardStream(d.createStream(ctx, announceType, key, opts))
+}
+
 // Unannounce removes this node from the DHT.
 func (d *HyperDHT) Unannounce(ctx context.Context, key []byte, opts *QueryOpts) error {
-	stream := d.createStream(ctx, unannounceType, key, opts)
-	for _ = range stream.ResponseChan() {
-	}
-	return <-stream.ErrorChan()
+	return dhtRpc.DiscardStream(d.createStream(ctx, unannounceType, key, opts))
 }
 
 func (d *HyperDHT) onQuery(n dhtRpc.Node, q *dhtRpc.Query) ([]byte, error) {

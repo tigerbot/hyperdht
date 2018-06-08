@@ -346,11 +346,7 @@ func TestDHTRateLimit(t *testing.T) {
 		}
 		go func() {
 			defer func() { streamFinished <- true }()
-			stream := swarm.client.Query(ctx, &query, nil)
-			// ResponseChan must be drained or it will back pressure the query.
-			for _ = range stream.ResponseChan() {
-			}
-			if err := <-stream.ErrorChan(); err != nil {
+			if err := DiscardStream(swarm.client.Query(ctx, &query, nil)); err != nil {
 				t.Errorf("backgrounded query errored: %v", err)
 			}
 		}()
@@ -399,11 +395,7 @@ func TestQueryRateLimit(t *testing.T) {
 
 		query := Query{Command: "hello", Target: swarm.servers[0].ID()}
 		opts := QueryOpts{Concurrency: concurrency}
-		stream := swarm.client.Query(ctx, &query, &opts)
-		// ResponseChan must be drained or it will back pressure the query.
-		for _ = range stream.ResponseChan() {
-		}
-		if err := <-stream.ErrorChan(); err != nil {
+		if err := DiscardStream(swarm.client.Query(ctx, &query, &opts)); err != nil {
 			t.Errorf("backgrounded query errored: %v", err)
 		}
 	}()

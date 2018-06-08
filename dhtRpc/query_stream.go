@@ -393,3 +393,12 @@ func CollectValues(stream *QueryStream) ([][]byte, error) {
 
 	return result, <-stream.ErrorChan()
 }
+
+// DiscardStream reads from a QueryStream's response channel to make sure the stream isn't back
+// pressured, but it discards all responses, only returning the final error.
+func DiscardStream(stream *QueryStream) error {
+	for _ = range stream.ResponseChan() {
+	}
+
+	return <-stream.ErrorChan()
+}
