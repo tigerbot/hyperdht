@@ -27,12 +27,13 @@ const (
 	secretSize     = 32
 	secretLifetime = 5 * time.Minute
 	tickInterval   = 5 * time.Second
+
+	pingCmd     = "_ping"
+	findNodeCmd = "_find_node"
 )
 
 // A QueryHandler handles query events from remote peers.
 type QueryHandler func(Node, *Query) ([]byte, error)
-
-func noopHandler(Node, *Query) ([]byte, error) { return nil, nil }
 
 // Config contains all of the options available for a DHT instance
 type Config struct {
@@ -75,7 +76,7 @@ func (d *DHT) ID() []byte {
 	return d.id[:]
 }
 
-// Addr returns the network address the socket underlying the DHT is using.
+// Addr returns the network address of the underlying socket the DHT is using.
 func (d *DHT) Addr() net.Addr {
 	return d.socket.Addr()
 }
@@ -197,7 +198,7 @@ func (d *DHT) addNode(peer net.Addr, id []byte) {
 }
 
 func (d *DHT) forwardRequest(from *udpRequest.PeerRequest, req *Request) {
-	if req.GetCommand() != "_ping" {
+	if req.GetCommand() != pingCmd {
 		return
 	}
 
@@ -213,7 +214,7 @@ func (d *DHT) forwardRequest(from *udpRequest.PeerRequest, req *Request) {
 	}
 }
 func (d *DHT) forwardResponse(peer *udpRequest.PeerRequest, req *Request) *udpRequest.PeerRequest {
-	if req.GetCommand() != "_ping" {
+	if req.GetCommand() != pingCmd {
 		return nil
 	}
 
@@ -255,81 +256,6 @@ func (d *DHT) onNodePing(current []kbucket.Contact, replacement kbucket.Contact)
 	}
 }
 
-func (d *DHT) onPing(p *udpRequest.PeerRequest, req *Request) {
-	res := &Response{
-		Id:    d.queryID,
-		Value: encodePeer(p),
-	}
-
-	if buf, err := proto.Marshal(res); err == nil {
-		d.socket.Respond(p, buf)
-	}
-}
-func (d *DHT) onFindNode(p *udpRequest.PeerRequest, req *Request) {
-	if len(req.Target) != IDSize {
-		return
-	}
-
-	res := &Response{
-		Id:    d.queryID,
-		Nodes: encodeNodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
-	}
-
-	if buf, err := proto.Marshal(res); err == nil {
-		d.socket.Respond(p, buf)
-	}
-}
-func (d *DHT) onQuery(p *udpRequest.PeerRequest, req *Request) {
-	if len(req.Target) != IDSize {
-		return
-	}
-
-	node := basicNode{
-		id:   req.Id,
-		addr: p.Addr,
-	}
-	query := &Query{
-		Command: req.GetCommand(),
-		Target:  req.Target,
-		Value:   req.Value,
-	}
-
-	var method string
-	// I'm not sure what added benefit/security is added by having this token system, but the
-	// nodejs implementation uses it and we are trying to stay compatible with it.
-	if d.validToken(p, req.GetCommand(), req.RoundtripToken) {
-		method = "update"
-	} else {
-		method = "query"
-	}
-
-	var handler QueryHandler
-	d.lock.RLock()
-	if h := d.handlers[method+":"+req.GetCommand()]; h != nil {
-		handler = h
-	} else if h = d.handlers[method]; h != nil {
-		handler = h
-	} else {
-		handler = noopHandler
-	}
-	d.lock.RUnlock()
-
-	value, err := handler(node, query)
-	if err != nil {
-		return
-	}
-	res := &Response{
-		Id:             d.queryID,
-		Value:          value,
-		Nodes:          encodeNodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
-		RoundtripToken: d.makeToken(p, req.GetCommand()),
-	}
-
-	if buf, err := proto.Marshal(res); err == nil {
-		d.socket.Respond(p, buf)
-	}
-}
-
 // OnQuery registers handlers for incoming queries. If the command string is the zero-value then
 // the handler will be used for any incoming queries whose command does not match one with a
 // specific handler added. Only one handler may be added for a particular event at a time, so
@@ -368,6 +294,61 @@ func (d *DHT) OnUpdate(command string, handler QueryHandler) {
 	}
 }
 
+func (d *DHT) getHandler(cmd string, isUpdate bool) QueryHandler {
+	var method string
+	// I'm not sure what added benefit/security is added by having this token system, but the
+	// nodejs implementation uses it and we are trying to stay compatible with it.
+	if isUpdate {
+		method = "update"
+	} else {
+		method = "query"
+	}
+
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	if h := d.handlers[method+":"+cmd]; h != nil {
+		return h
+	}
+	return d.handlers[method]
+}
+func (d *DHT) createResponse(peer net.Addr, req *Request) *Response {
+	// While I think it would be potentially useful to allow targets of different ID size, there
+	// is potential for problems in the ambiguity of what nodes are closest, particularly if the
+	// target size is too small. For example if there were hundreds of nodes with the same distance
+	// to a target, which ones should be contacted and would a different peer choose differently?
+	// TODO? decide a minimal threshold and accept targets any size bigger than that.
+	if len(req.Target) != IDSize {
+		return nil
+	}
+
+	cmd := req.GetCommand()
+	res := &Response{
+		Nodes:          encodeNodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
+		RoundtripToken: d.makeToken(peer, cmd),
+	}
+
+	// A valid round trip token constitutes a update.
+	// I'm not sure what added benefit/security is added by having this token system, but the
+	// nodejs implementation uses it and we are trying to stay compatible with it.
+	handler := d.getHandler(cmd, d.validToken(peer, cmd, req.RoundtripToken))
+	if handler == nil {
+		return res
+	}
+
+	node := basicNode{id: req.Id, addr: peer}
+	query := &Query{
+		Command: cmd,
+		Target:  req.GetTarget(),
+		Value:   req.GetValue(),
+	}
+
+	var err error
+	if res.Value, err = handler(node, query); err != nil {
+		return nil
+	}
+	return res
+}
+
 // HandleUDPRequest implements the udpRequest.Handler interface. It is not recommended to
 // use this function directly even though it is exported.
 func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
@@ -388,13 +369,23 @@ func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
 		}
 	}
 
+	var res *Response
 	switch req.GetCommand() {
 	case "_ping":
-		d.onPing(p, req)
+		res = &Response{Value: encodePeer(p.Addr)}
 	case "_find_node":
-		d.onFindNode(p, req)
+		if len(req.Target) == IDSize {
+			res = &Response{Nodes: encodeNodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20))}
+		}
 	default:
-		d.onQuery(p, req)
+		res = d.createResponse(p.Addr, req)
+	}
+
+	if res != nil {
+		res.Id = d.queryID
+		if buf, err := proto.Marshal(res); err == nil {
+			d.socket.Respond(p, buf)
+		}
 	}
 }
 
@@ -426,7 +417,7 @@ func (d *DHT) request(ctx context.Context, peer net.Addr, req *Request) (*Respon
 
 // Ping sends a special query that always responds with our address as the peer saw it.
 func (d *DHT) Ping(ctx context.Context, peer net.Addr) (net.Addr, error) {
-	cmd := "_ping"
+	cmd := pingCmd
 	res, err := d.request(ctx, peer, &Request{Command: &cmd, Id: d.queryID})
 	if err != nil {
 		return nil, err
@@ -439,7 +430,7 @@ func (d *DHT) Ping(ctx context.Context, peer net.Addr) (net.Addr, error) {
 
 // Holepunch uses the `referrer` node as a STUN server to UDP hole punch to the `peer`.
 func (d *DHT) Holepunch(ctx context.Context, peer, referrer net.Addr) error {
-	cmd := "_ping"
+	cmd := pingCmd
 	req := &Request{
 		Command:        &cmd,
 		Id:             d.queryID,

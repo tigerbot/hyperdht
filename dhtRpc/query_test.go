@@ -144,28 +144,28 @@ func createSwarm(size int) *dhtSwarm {
 	return result
 }
 
-func testQuery(t *testing.T, client *DHT, update bool, query *Query, opts *QueryOpts, respValue []byte) {
+func testQuery(t *testing.T, pair *dhtPair, update bool, query *Query, opts *QueryOpts, respValue []byte) {
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
 
 	var stream *QueryStream
 	if update {
-		stream = client.Update(ctx, query, opts)
+		stream = pair.client.Update(ctx, query, opts)
 	} else {
-		stream = client.Query(ctx, query, opts)
+		stream = pair.client.Query(ctx, query, opts)
 	}
 	responses, err := CollectStream(stream)
 	if err != nil {
 		t.Error("query returned unexpected error:", err)
 	} else if len(responses) != 1 {
-		t.Errorf("query returned %d response, expected 1\n%v", len(responses), responses)
+		t.Errorf("query returned %d response, expected 1", len(responses))
 	} else {
 		resp := responses[0]
 		if !bytes.Equal(resp.Value, respValue) {
 			t.Errorf("query response had %q as value expected %q", resp.Value, respValue)
 		}
-		if !bytes.Equal(resp.Node.ID(), query.Target) {
-			t.Errorf("query response ID is %x, expected %x", resp.Node.ID(), query.Target)
+		if !bytes.Equal(resp.Node.ID(), pair.server.ID()) {
+			t.Errorf("query response ID is %x, expected %x", resp.Node.ID(), pair.server.ID())
 		}
 	}
 }
@@ -197,9 +197,9 @@ func TestSimpleQuery(t *testing.T) {
 		return []byte("this is not the world"), nil
 	})
 
-	testQuery(t, pair.client, false, &query, nil, []byte("world"))
+	testQuery(t, pair, false, &query, nil, []byte("world"))
 	pair.server.OnQuery("hello", nil)
-	testQuery(t, pair.client, false, &query, nil, []byte("this is not the world"))
+	testQuery(t, pair, false, &query, nil, []byte("this is not the world"))
 }
 
 func TestSimpleUpdate(t *testing.T) {
@@ -221,7 +221,7 @@ func TestSimpleUpdate(t *testing.T) {
 		return q.Value, nil
 	})
 
-	testQuery(t, pair.client, true, &update, nil, update.Value)
+	testQuery(t, pair, true, &update, nil, update.Value)
 }
 
 func TestTargetedQuery(t *testing.T) {
@@ -242,10 +242,15 @@ func TestTargetedQuery(t *testing.T) {
 		t.Error("the second server was accessed")
 		return nil, nil
 	})
+	pair.client.OnQuery("", func(Node, *Query) ([]byte, error) {
+		t.Error("the client was accessed")
+		return nil, nil
+	})
 
+	// Use serverB's ID as target to make sure it's not visited even when it's closer.
 	query := Query{
 		Command: "hello",
-		Target:  pair.server.ID(),
+		Target:  serverB.ID(),
 	}
 	pair.server.OnQuery("hello", func(n Node, q *Query) ([]byte, error) {
 		if !bytes.Equal(n.ID(), pair.client.ID()) {
@@ -257,13 +262,11 @@ func TestTargetedQuery(t *testing.T) {
 		return []byte("world"), nil
 	})
 
-	addr := pair.server.Addr().(*net.UDPAddr)
-	addr.IP = net.IPv4(127, 0, 0, 1)
 	opts := &QueryOpts{
-		Nodes: []Node{basicNode{id: pair.server.ID(), addr: addr}},
+		Nodes: []Node{basicNode{id: pair.server.ID(), addr: localizeAddr(pair.server.Addr())}},
 	}
 
-	testQuery(t, pair.client, false, &query, opts, []byte("world"))
+	testQuery(t, pair, false, &query, opts, []byte("world"))
 }
 
 func TestTargetedUpdate(t *testing.T) {
@@ -281,13 +284,27 @@ func TestTargetedUpdate(t *testing.T) {
 	}
 	done()
 	serverB.OnQuery("", func(Node, *Query) ([]byte, error) {
-		t.Error("the second server was accessed")
+		t.Error("the second server's query handler was accessed")
+		return nil, nil
+	})
+	serverB.OnUpdate("", func(Node, *Query) ([]byte, error) {
+		t.Error("the second server's update handler was accessed")
 		return nil, nil
 	})
 
+	pair.client.OnQuery("", func(Node, *Query) ([]byte, error) {
+		t.Error("the client's query handler was accessed")
+		return nil, nil
+	})
+	pair.client.OnUpdate("", func(Node, *Query) ([]byte, error) {
+		t.Error("the client's update handler was accessed")
+		return nil, nil
+	})
+
+	// Use serverB's ID as target to make sure it's not visited even when it's closer.
 	update := Query{
 		Command: "echo",
-		Target:  pair.server.ID(),
+		Target:  serverB.ID(),
 		Value:   []byte("Hello World!"),
 	}
 	pair.server.OnUpdate("echo", func(n Node, q *Query) ([]byte, error) {
@@ -300,13 +317,11 @@ func TestTargetedUpdate(t *testing.T) {
 		return q.Value, nil
 	})
 
-	addr := pair.server.Addr().(*net.UDPAddr)
-	addr.IP = net.IPv4(127, 0, 0, 1)
 	opts := &QueryOpts{
-		Nodes: []Node{basicNode{id: pair.server.ID(), addr: addr}},
+		Nodes: []Node{basicNode{id: pair.server.ID(), addr: localizeAddr(pair.server.Addr())}},
 	}
 
-	testQuery(t, pair.client, true, &update, opts, update.Value)
+	testQuery(t, pair, true, &update, opts, update.Value)
 }
 
 func TestDHTRateLimit(t *testing.T) {
@@ -458,6 +473,67 @@ func TestSwarmQuery(t *testing.T) {
 				t.Errorf("queried value %q doesn't match expected %q", resp.Value, updateVal)
 			}
 		}
+	}
+}
+
+func TestSelfQuery(t *testing.T) {
+	swarm := createSwarm(32)
+	defer swarm.Close()
+
+	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	defer done()
+
+	initialVal, updateVal := []byte("initial value"), []byte("updated value")
+	{
+		value := initialVal
+		swarm.client.OnQuery("kv", func(Node, *Query) ([]byte, error) {
+			return value, nil
+		})
+		swarm.client.OnUpdate("kv", func(_ Node, q *Query) ([]byte, error) {
+			value = q.Value
+			return value, nil
+		})
+	}
+
+	query := Query{
+		Command: "kv",
+		Target:  swarm.client.ID(),
+	}
+	if values, err := CollectValues(swarm.client.Query(ctx, &query, nil)); err != nil {
+		t.Error("query errored:", err)
+	} else if !reflect.DeepEqual(values, [][]byte{initialVal}) {
+		t.Errorf("query values were %q, expected %q", values, [][]byte{initialVal})
+	}
+
+	query.Value = updateVal
+	if values, err := CollectValues(swarm.client.Update(ctx, &query, nil)); err != nil {
+		t.Error("update errored:", err)
+	} else if !reflect.DeepEqual(values, [][]byte{updateVal}) {
+		t.Errorf("update values were %q, expected %q", values, [][]byte{updateVal})
+	}
+
+	query.Value = initialVal
+	opts := QueryOpts{Verbose: true}
+	if values, err := CollectValues(swarm.client.Update(ctx, &query, &opts)); err != nil {
+		t.Error("verbose update errored:", err)
+	} else if !reflect.DeepEqual(values, [][]byte{updateVal, initialVal}) {
+		t.Errorf("verbose update values were %q, expected %q", values, [][]byte{updateVal, initialVal})
+	}
+
+	// Put the target as far away from the client as possible to make sure it isn't queried.
+	query.Target = make([]byte, IDSize)
+	for i := range query.Target {
+		query.Target[i] = swarm.client.id[i] ^ 0xff
+	}
+	if values, err := CollectValues(swarm.client.Query(ctx, &query, nil)); err != nil {
+		t.Error("far query errored:", err)
+	} else if values != nil {
+		t.Errorf("far query values were %q, expected nil", values)
+	}
+	if values, err := CollectValues(swarm.client.Update(ctx, &query, nil)); err != nil {
+		t.Error("far update errored:", err)
+	} else if values != nil {
+		t.Errorf("far update values were %q, expected nil", values)
 	}
 }
 
