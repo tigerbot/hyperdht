@@ -5,57 +5,20 @@ import (
 	"encoding/hex"
 	"log"
 	"math/rand"
-	"net"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 
 	"gitlab.daplie.com/core-sdk/hyperdht"
 	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
 )
 
+var quiet bool
+
 type handler func(context.Context, *sync.WaitGroup, *hyperdht.HyperDHT, []byte)
-
-type addrList []net.Addr
-
-func (l *addrList) Type() string {
-	return "host:port"
-}
-func (l *addrList) String() string {
-	if l == nil {
-		return ""
-	}
-
-	str := make([]string, 0, len(*l))
-	for _, a := range *l {
-		str = append(str, a.String())
-	}
-	return strings.Join(str, ",")
-}
-func (l *addrList) Set(input string) error {
-	for _, str := range strings.Split(input, ",") {
-		hostStr, portStr, err := net.SplitHostPort(str)
-		if err != nil {
-			return errors.Errorf("%q is not a valid network address", str)
-		}
-
-		host := net.ParseIP(hostStr)
-		port, err := strconv.ParseUint(portStr, 10, 16)
-		if err != nil || host == nil || port == 0 {
-			return errors.Errorf("%q is not a valid network address", str)
-		}
-
-		*l = append(*l, &net.UDPAddr{IP: host, Port: int(port)})
-	}
-
-	return nil
-}
 
 func interruptCtx() context.Context {
 	ctx, done := context.WithCancel(context.Background())
@@ -77,26 +40,18 @@ func randDuration() time.Duration {
 }
 
 func normal(ctx context.Context, dht *hyperdht.HyperDHT) {
-	timer := time.NewTimer(randDuration())
-	defer timer.Stop()
-
-	run := func() {
+	for {
 		if err := dht.Bootstrap(ctx); err != nil {
 			log.Println("encountered error bootstrapping:", err)
-		} else {
+		} else if !quiet {
 			log.Println("bootstrapped...")
 		}
-	}
 
-	run()
-	for {
+		timer := time.NewTimer(randDuration())
 		select {
 		case <-ctx.Done():
 			return
-
 		case <-timer.C:
-			run()
-			timer.Reset(randDuration())
 		}
 	}
 }
@@ -110,7 +65,7 @@ func announce(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT,
 	run := func() {
 		if err := dht.AnnounceDiscard(ctx, key, nil); err != nil {
 			log.Printf("encountered error announcing %x: %v\n", key, err)
-		} else {
+		} else if !quiet {
 			log.Printf("announced %x...\n", key)
 		}
 	}
@@ -121,7 +76,7 @@ func announce(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT,
 		defer done()
 		if err := dht.Unannounce(ctx, key, nil); err != nil {
 			log.Printf("encountered error unannouncing %x: %v\n", key, err)
-		} else {
+		} else if !quiet {
 			log.Printf("unannounced %x\n", key)
 		}
 	}
@@ -160,13 +115,11 @@ func query(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT, ke
 
 func iterateKeys(ctx context.Context, dht *hyperdht.HyperDHT, args []string, f handler) {
 	keyList := make([][]byte, 0, len(args))
-	for _, arg := range args {
-		for _, hexKey := range strings.Split(arg, ",") {
-			if key, err := hex.DecodeString(hexKey); err != nil {
-				log.Fatalf("invalid hex key %q: %v", hexKey, err)
-			} else {
-				keyList = append(keyList, key)
-			}
+	for _, hexKey := range args {
+		if key, err := hex.DecodeString(hexKey); err != nil {
+			log.Fatalf("invalid hex key %q: %v", hexKey, err)
+		} else {
+			keyList = append(keyList, key)
 		}
 	}
 
@@ -183,28 +136,31 @@ func iterateKeys(ctx context.Context, dht *hyperdht.HyperDHT, args []string, f h
 }
 
 func main() {
-	var bootstrap addrList
+	var cfg config
 	var ourKeys, queryKeys []string
-	var port int
-	var ephemeral bool
 
-	pflag.IntVarP(&port, "port", "p", 0, "the port to listen on")
-	pflag.VarP(&bootstrap, "bootstrap", "b", "the list of servers to contact initially")
-	pflag.BoolVar(&ephemeral, "ephemeral", false, "don't inform other peers of our ID")
-	pflag.StringArrayVarP(&ourKeys, "announce", "a", nil, "the list of keys to announce on")
-	pflag.StringArrayVarP(&queryKeys, "query", "q", nil, "the list of keys to query (incompatible with announce)")
+	pflag.VarP(&cfg, "config", "c", "the location of the config file to read")
+	pflag.IntVarP(&cfg.Port, "port", "p", 0, "the port to listen on")
+	pflag.BoolVar(&cfg.Ephemeral, "ephemeral", false, "don't inform other peers of our ID")
+	pflag.StringSliceVarP(&cfg.BootStrap, "bootstrap", "b", nil, "the list of servers to contact initially")
+
+	pflag.BoolVar(&quiet, "quiet", false, "don't print the periodic messages")
+	pflag.StringSliceVarP(&ourKeys, "announce", "a", nil, "the list of keys to announce on")
+	pflag.StringSliceVarP(&queryKeys, "query", "q", nil, "the list of keys to query (incompatible with announce)")
 	pflag.Parse()
 
 	if len(ourKeys) > 0 && len(queryKeys) > 0 {
 		log.Fatal("announce and query cannot be run in the same command")
 	}
 
-	cfg := dhtRpc.Config{
-		BootStrap: bootstrap,
-		Port:      port,
-		Ephemeral: ephemeral || len(queryKeys) > 0,
+	dhtCfg := dhtRpc.Config{
+		ID:          cfg.ID,
+		BootStrap:   cfg.parseBootstrap(),
+		Port:        cfg.Port,
+		Ephemeral:   cfg.Ephemeral || len(queryKeys) > 0,
+		Concurrency: cfg.Concurrency,
 	}
-	dht, err := hyperdht.New(&cfg)
+	dht, err := hyperdht.New(&dhtCfg)
 	if err != nil {
 		log.Fatalln("error creating hyperdht node", err)
 	}
@@ -214,10 +170,7 @@ func main() {
 	ctx := interruptCtx()
 	if len(queryKeys) > 0 {
 		iterateKeys(ctx, dht, queryKeys, query)
-		return
-	}
-
-	if len(ourKeys) > 0 {
+	} else if len(ourKeys) > 0 {
 		iterateKeys(ctx, dht, ourKeys, announce)
 	} else {
 		normal(ctx, dht)
