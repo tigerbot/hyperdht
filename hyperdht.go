@@ -49,7 +49,7 @@ func (d *HyperDHT) OnUpdate(cmd string, handler dhtRpc.QueryHandler) {
 }
 
 func (d *HyperDHT) createStream(ctx context.Context, kind uint32, key []byte, opts *QueryOpts) *subStream {
-	req := &Request{
+	req := &PeerRequest{
 		Type: &kind,
 	}
 	if opts != nil {
@@ -123,7 +123,7 @@ func (d *HyperDHT) onUpdate(n dhtRpc.Node, q *dhtRpc.Query) ([]byte, error) {
 	return d.onRequest(n, q, true)
 }
 func (d *HyperDHT) onRequest(n dhtRpc.Node, q *dhtRpc.Query, isUpdate bool) ([]byte, error) {
-	var req Request
+	var req PeerRequest
 	if err := proto.Unmarshal(q.Value, &req); err == nil {
 		if res := d.processPeers(&req, n.Addr(), q.Target, isUpdate); res != nil {
 			if resBuf, err := proto.Marshal(res); err == nil {
@@ -137,7 +137,7 @@ func (d *HyperDHT) onRequest(n dhtRpc.Node, q *dhtRpc.Query, isUpdate bool) ([]b
 	return nil, nil
 }
 
-func (d *HyperDHT) processPeers(req *Request, from net.Addr, target []byte, isUpdate bool) *Response {
+func (d *HyperDHT) processPeers(req *PeerRequest, from net.Addr, target []byte, isUpdate bool) *PeerResponse {
 	if port := req.GetPort(); port != 0 {
 		from = overridePort(from, int(port))
 	}
@@ -179,7 +179,7 @@ func (d *HyperDHT) processPeers(req *Request, from net.Addr, target []byte, isUp
 	if peersBuf == nil {
 		return nil
 	}
-	return &Response{
+	return &PeerResponse{
 		Peers:      peersBuf,
 		LocalPeers: localBuf,
 	}

@@ -56,7 +56,7 @@ func (s *QueryStream) runMap() {
 	defer close(s.respChan)
 
 	for rawRes := range s.subStream.ResponseChan() {
-		var res Response
+		var res PeerResponse
 		if err := proto.Unmarshal(rawRes.Value, &res); err != nil {
 			continue
 		}
