@@ -12,7 +12,7 @@ import (
 	"github.com/pkg/errors"
 
 	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
-	"gitlab.daplie.com/core-sdk/hyperdht/peerEncoding"
+	"gitlab.daplie.com/core-sdk/hyperdht/ipEncoding"
 )
 
 const (
@@ -204,13 +204,13 @@ func NewWithDHT(dht *dhtRpc.DHT) *HyperDHT {
 	return result
 }
 
-const peerEnc = peerEncoding.IPv4Encoder(0)
+const peerEnc = ipEncoding.IPv4Encoder(0)
 
 func encodePeer(addr net.Addr) []byte {
 	if addr == nil {
 		return nil
 	}
-	list := []peerEncoding.Node{peerEncoding.BasicNode{MyAddr: addr}}
+	list := []ipEncoding.Node{ipEncoding.BasicNode{MyAddr: addr}}
 	return peerEnc.Encode(list)
 }
 func decodePeer(buf []byte) net.Addr {

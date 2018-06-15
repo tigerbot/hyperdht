@@ -3,17 +3,17 @@ package dhtRpc
 import (
 	"net"
 
+	"gitlab.daplie.com/core-sdk/hyperdht/ipEncoding"
 	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
-	"gitlab.daplie.com/core-sdk/hyperdht/peerEncoding"
 )
 
 const (
-	peerEnc = peerEncoding.IPv4Encoder(0)
-	nodeEnc = peerEncoding.IPv4Encoder(IDSize)
+	peerEnc = ipEncoding.IPv4Encoder(0)
+	nodeEnc = ipEncoding.IPv4Encoder(IDSize)
 )
 
 func encodePeer(addr net.Addr) []byte {
-	list := []peerEncoding.Node{basicNode{addr: addr}}
+	list := []ipEncoding.Node{basicNode{addr: addr}}
 	return peerEnc.Encode(list)
 }
 func decodePeer(buf []byte) net.Addr {
@@ -25,15 +25,15 @@ func decodePeer(buf []byte) net.Addr {
 }
 
 func encodeNodes(nodes []kbucket.Contact) []byte {
-	list := make([]peerEncoding.Node, 0, len(nodes))
+	list := make([]ipEncoding.Node, 0, len(nodes))
 	for _, c := range nodes {
-		if n, ok := c.(peerEncoding.Node); ok {
+		if n, ok := c.(ipEncoding.Node); ok {
 			list = append(list, n)
 		}
 	}
 
 	return nodeEnc.Encode(list)
 }
-func decodeNodes(buf []byte) []peerEncoding.Node {
+func decodeNodes(buf []byte) []ipEncoding.Node {
 	return nodeEnc.Decode(buf)
 }

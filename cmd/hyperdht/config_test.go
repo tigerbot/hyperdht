@@ -89,7 +89,7 @@ func TestBootstrapParsing(t *testing.T) {
 
 	parsed := cfg.parseBootstrap()
 	expected := []net.Addr{
-		&net.UDPAddr{IP: net.IPv4(45, 55, 220, 157), Port: 49737},
+		&net.UDPAddr{IP: net.IPv4(138, 197, 217, 160), Port: 49737},
 		&net.UDPAddr{IP: net.IPv4(192, 168, 25, 1), Port: 12345},
 	}
 	if !reflect.DeepEqual(parsed, expected) {

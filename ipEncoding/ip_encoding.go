@@ -1,4 +1,4 @@
-package peerEncoding
+package ipEncoding
 
 import (
 	"net"
