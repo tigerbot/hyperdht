@@ -52,31 +52,35 @@ type QueryStream struct {
 // continue with the query.
 func (s *QueryStream) ResponseChan() <-chan QueryResponse { return s.respChan }
 
-func (s *QueryStream) runMap() {
+func (s *QueryStream) runMap(selfAddr net.Addr, selfRes *PeerResponse) {
 	defer close(s.respChan)
 
+	handleResponse := func(from net.Addr, res *PeerResponse) {
+		peers := decodeAllPeers(res.Peers)
+		if peers == nil {
+			return
+		}
+
+		qRes := QueryResponse{
+			Node:       from,
+			Peers:      peers,
+			LocalPeers: decodeLocalPeers(s.localAddr, res.LocalPeers),
+		}
+		select {
+		case s.respChan <- qRes:
+		case <-s.ctx.Done():
+			return
+		}
+	}
+
+	if selfRes != nil {
+		handleResponse(selfAddr, selfRes)
+	}
 	for rawRes := range s.subStream.ResponseChan() {
 		var res PeerResponse
 		if err := proto.Unmarshal(rawRes.Value, &res); err == nil {
-			s.handleResponse(rawRes.Node.Addr(), &res)
+			handleResponse(rawRes.Node.Addr(), &res)
 		}
-	}
-}
-func (s *QueryStream) handleResponse(from net.Addr, res *PeerResponse) {
-	peers := decodeAllPeers(res.Peers)
-	if peers == nil {
-		return
-	}
-
-	qRes := QueryResponse{
-		Node:       from,
-		Peers:      peers,
-		LocalPeers: decodeLocalPeers(s.localAddr, res.LocalPeers),
-	}
-	select {
-	case s.respChan <- qRes:
-	case <-s.ctx.Done():
-		return
 	}
 }
 

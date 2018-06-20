@@ -4,12 +4,23 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func localizeAddr(addr net.Addr) net.Addr {
+	udpAddr, ok := addr.(*net.UDPAddr)
+	if !ok {
+		return addr
+	}
+	newAddr := *udpAddr
+	newAddr.IP = net.IPv4(127, 0, 0, 1)
+	return &newAddr
+}
 
 type Echoer struct {
 	sock     *UDPRequest
@@ -37,7 +48,7 @@ func testEcho(t *testing.T, sock *UDPRequest, message string, wait *sync.WaitGro
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
 
-	if resp, err := sock.Request(ctx, sock.Addr(), []byte(message)); err != nil {
+	if resp, err := sock.Request(ctx, localizeAddr(sock.Addr()), []byte(message)); err != nil {
 		t.Error(err)
 	} else if string(resp) != message {
 		t.Errorf("got %q, expected %q", resp, message)
@@ -48,7 +59,7 @@ func testEcho(t *testing.T, sock *UDPRequest, message string, wait *sync.WaitGro
 	}
 }
 func checkTimeoutErr(t *testing.T, sock *UDPRequest) {
-	resp, err := sock.Request(context.Background(), sock.Addr(), []byte("hello"))
+	resp, err := sock.Request(context.Background(), localizeAddr(sock.Addr()), []byte("hello"))
 	if resp != nil {
 		t.Errorf("got non-nil buffer from timed-out request: %v", resp)
 	}
@@ -105,7 +116,7 @@ func TestCancel(t *testing.T) {
 	defer sock.Close()
 
 	time.AfterFunc(time.Millisecond, cancel)
-	resp, err := sock.Request(ctx, sock.Addr(), []byte("hello"))
+	resp, err := sock.Request(ctx, localizeAddr(sock.Addr()), []byte("hello"))
 	if resp != nil {
 		t.Errorf("got non-nil buffer from canceled request: %v", resp)
 	}
@@ -153,12 +164,12 @@ func TestForward(t *testing.T) {
 	// The layer that can actually handle requests to forward to a particular peer is a layer above
 	// us, so we have the "to" value hard coded to what the test needs to pass.
 	middle.SetHandler(HandlerFunc(func(p *PeerRequest, msg []byte) {
-		if err := middle.ForwardRequest(p, remote.Addr(), msg); err != nil {
+		if err := middle.ForwardRequest(p, localizeAddr(remote.Addr()), msg); err != nil {
 			t.Errorf("middle failed to forward to remote: %v", err)
 		}
 	}))
 	remote.SetHandler(HandlerFunc(func(p *PeerRequest, msg []byte) {
-		if err := remote.ForwardResponse(p, origin.Addr(), msg); err != nil {
+		if err := remote.ForwardResponse(p, localizeAddr(origin.Addr()), msg); err != nil {
 			t.Errorf("remote failed to forward to origin: %v", err)
 		}
 	}))
@@ -167,7 +178,7 @@ func TestForward(t *testing.T) {
 	defer done()
 
 	const message = "this will go through the middle socket"
-	if resp, err := origin.Request(ctx, middle.Addr(), []byte(message)); err != nil {
+	if resp, err := origin.Request(ctx, localizeAddr(middle.Addr()), []byte(message)); err != nil {
 		t.Error(err)
 	} else if string(resp) != message {
 		t.Errorf("got %q, expected %q", resp, message)
@@ -202,9 +213,16 @@ func TestBadPackets(t *testing.T) {
 		t.Fatal("failed to create random buffer:", err)
 	}
 	t.Logf("random buffer: %x", buf)
+
+	var failCnt int
 	for i := range buf {
-		if _, err := sock.socket.WriteTo(buf[:i+1], sock.Addr()); err != nil {
+		if _, err := sock.socket.WriteTo(buf[:i+1], localizeAddr(sock.Addr())); err != nil {
 			t.Errorf("error sending bad packet #%d: %v", i+1, err)
+			if failCnt++; failCnt >= 4 {
+				break
+			}
+		} else {
+			failCnt = 0
 		}
 	}
 

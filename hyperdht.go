@@ -75,11 +75,8 @@ func (d *HyperDHT) createMappedStream(ctx context.Context, key []byte, req *Peer
 	stream := d.createStream(ctx, key, req)
 	result := &QueryStream{stream, req.GetLocalAddress(), ctx, make(chan QueryResponse)}
 
-	if localRes := d.processPeers(req, d.dht.Addr(), key, false); localRes != nil {
-		go result.handleResponse(d.Addr(), localRes)
-	}
-
-	go result.runMap()
+	localRes := d.processPeers(req, d.Addr(), key, false)
+	go result.runMap(d.Addr(), localRes)
 	return result
 }
 
