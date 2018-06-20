@@ -146,17 +146,9 @@ func (s *QueryStream) runStream() {
 		} else if atomic.LoadInt32(&inflight) > 0 {
 			cond.Wait()
 		} else if s.isUpdate && !committing {
-			// We've gotten as close to the target as we could, so now we should be able to
-			// tell if our node is close enough to justify querying, assuming the caller wants
-			// the result from query responses.
-			if s.verbose {
-				s.querySelf(false)
-			}
-
 			committing = true
 			list = &s.closest
 		} else {
-			s.querySelf(committing)
 			return
 		}
 	}
@@ -226,35 +218,6 @@ func (s *QueryStream) send(node *queryNode, isUpdate bool) {
 	select {
 	case s.respChan <- queryRes:
 	case <-s.ctx.Done():
-	}
-}
-func (s *QueryStream) querySelf(isUpdate bool) {
-	if !s.moveCloser {
-		return
-	}
-
-	// If we don't even care to handle this type of query return immediately.
-	handler := s.dht.getHandler(s.query.Command, isUpdate)
-	if handler == nil {
-		return
-	}
-
-	var list *queryNodeList
-	if isUpdate {
-		list = &s.closest
-	} else {
-		list = &s.pending
-	}
-	// If our node doesn't qualify to be one of the closest nodes don't query/update ourselves.
-	if cnt := len(list.list); cnt >= list.capacity && list.distCmp.Closer(list.list[cnt-1].id, s.dht.id[:]) {
-		return
-	}
-
-	if value, err := handler(s.dht, s.query); err == nil {
-		select {
-		case s.respChan <- QueryResponse{Node: s.dht, Value: value}:
-		case <-s.ctx.Done():
-		}
 	}
 }
 

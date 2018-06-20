@@ -468,67 +468,6 @@ func TestSwarmQuery(t *testing.T) {
 	}
 }
 
-func TestSelfQuery(t *testing.T) {
-	swarm := createSwarm(32)
-	defer swarm.Close()
-
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
-	defer done()
-
-	initialVal, updateVal := []byte("initial value"), []byte("updated value")
-	{
-		value := initialVal
-		swarm.client.OnQuery("kv", func(Node, *Query) ([]byte, error) {
-			return value, nil
-		})
-		swarm.client.OnUpdate("kv", func(_ Node, q *Query) ([]byte, error) {
-			value = q.Value
-			return value, nil
-		})
-	}
-
-	query := Query{
-		Command: "kv",
-		Target:  swarm.client.ID(),
-	}
-	if values, err := CollectValues(swarm.client.Query(ctx, &query, nil)); err != nil {
-		t.Error("query errored:", err)
-	} else if !reflect.DeepEqual(values, [][]byte{initialVal}) {
-		t.Errorf("query values were %q, expected %q", values, [][]byte{initialVal})
-	}
-
-	query.Value = updateVal
-	if values, err := CollectValues(swarm.client.Update(ctx, &query, nil)); err != nil {
-		t.Error("update errored:", err)
-	} else if !reflect.DeepEqual(values, [][]byte{updateVal}) {
-		t.Errorf("update values were %q, expected %q", values, [][]byte{updateVal})
-	}
-
-	query.Value = initialVal
-	opts := QueryOpts{Verbose: true}
-	if values, err := CollectValues(swarm.client.Update(ctx, &query, &opts)); err != nil {
-		t.Error("verbose update errored:", err)
-	} else if !reflect.DeepEqual(values, [][]byte{updateVal, initialVal}) {
-		t.Errorf("verbose update values were %q, expected %q", values, [][]byte{updateVal, initialVal})
-	}
-
-	// Put the target as far away from the client as possible to make sure it isn't queried.
-	query.Target = make([]byte, IDSize)
-	for i := range query.Target {
-		query.Target[i] = swarm.client.id[i] ^ 0xff
-	}
-	if values, err := CollectValues(swarm.client.Query(ctx, &query, nil)); err != nil {
-		t.Error("far query errored:", err)
-	} else if values != nil {
-		t.Errorf("far query values were %q, expected nil", values)
-	}
-	if values, err := CollectValues(swarm.client.Update(ctx, &query, nil)); err != nil {
-		t.Error("far update errored:", err)
-	} else if values != nil {
-		t.Errorf("far update values were %q, expected nil", values)
-	}
-}
-
 func TestNonephemeralBootstrap(t *testing.T) {
 	swarm := createSwarm(32)
 	defer swarm.Close()

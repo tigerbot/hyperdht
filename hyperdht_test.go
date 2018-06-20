@@ -60,11 +60,7 @@ func createPair() *dhtPair {
 		panic(err)
 	}
 	cfg := &dhtRpc.Config{BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr())}}
-
-	// We have a rather long timeout here for the race condition tests. With how many routines
-	// we spawn here it takes a lot of work for the race detector to do whatever it needs to do
-	// to detect the races, so we allow it plenty of time. Normal tests shouldn't take that long.
-	ctx, done := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
 
 	if result.server, err = New(cfg); err != nil {
@@ -72,6 +68,8 @@ func createPair() *dhtPair {
 	} else if err = result.server.Bootstrap(ctx); err != nil {
 		panic(err)
 	}
+
+	cfg.Ephemeral = true
 	if result.client, err = New(cfg); err != nil {
 		panic(err)
 	}
@@ -94,16 +92,39 @@ func TestHyperDHTBasic(t *testing.T) {
 	}
 
 	if responses, err := CollectStream(pair.client.Lookup(ctx, key, nil)); err != nil {
-		t.Error("error looking up:", err)
+		t.Error("error looking up from client:", err)
 	} else if len(responses) != 1 {
-		t.Errorf("lookup received %d responses, expected 1\n\t%#v", len(responses), responses)
+		t.Errorf("lookup from client received %d responses, expected 1\n\t%#v", len(responses), responses)
 	} else {
 		resp := responses[0]
 		if len(resp.Peers) != 1 {
-			t.Errorf("lookup resulted in %d peers, expected 1\n\t%#v", len(resp.Peers), resp.Peers)
+			t.Errorf("lookup from client resulted in %d peers, expected 1\n\t%#v", len(resp.Peers), resp.Peers)
 		} else if addr := localizeAddr(pair.server.Addr()); resp.Peers[0].String() != addr.String() {
-			t.Errorf("lookup returned peer %s, expected %s", resp.Peers[0], addr)
+			t.Errorf("lookup from client returned peer %s, expected %s", resp.Peers[0], addr)
 		}
+	}
+
+	// We lookup from the bootstrap to make sure that a lookup also returns data stored in
+	// the node that is doing the lookup.
+	if responses, err := CollectStream(pair.bootstrap.Lookup(ctx, key, nil)); err != nil {
+		t.Error("error looking up from bootstrap:", err)
+	} else if len(responses) != 1 {
+		t.Errorf("lookup from bootstrap received %d responses, expected 1\n\t%#v", len(responses), responses)
+	} else {
+		resp := responses[0]
+		if len(resp.Peers) != 1 {
+			t.Errorf("lookup from bootstrap resulted in %d peers, expected 1\n\t%#v", len(resp.Peers), resp.Peers)
+		} else if addr := localizeAddr(pair.server.Addr()); resp.Peers[0].String() != addr.String() {
+			t.Errorf("lookup from bootstrap returned peer %s, expected %s", resp.Peers[0], addr)
+		}
+	}
+
+	// We lookup from the server to make sure that a lookup doesn't return the node that is doing
+	// the lookup.
+	if responses, err := CollectStream(pair.server.Lookup(ctx, key, nil)); err != nil {
+		t.Error("error looking up from server:", err)
+	} else if len(responses) != 0 {
+		t.Errorf("lookup from server received %d responses, expected 0\n\t%#v", len(responses), responses)
 	}
 
 	if err := pair.server.Unannounce(ctx, key, nil); err != nil {

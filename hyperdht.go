@@ -48,17 +48,7 @@ func (d *HyperDHT) OnUpdate(cmd string, handler dhtRpc.QueryHandler) {
 	}
 }
 
-func (d *HyperDHT) createStream(ctx context.Context, kind uint32, key []byte, opts *QueryOpts) *subStream {
-	req := &PeerRequest{
-		Type: &kind,
-	}
-	if opts != nil {
-		req.LocalAddress = encodePeer(opts.LocalAddr)
-		if port := uint32(opts.Port); port != 0 {
-			req.Port = &port
-		}
-	}
-
+func (d *HyperDHT) createStream(ctx context.Context, key []byte, req *PeerRequest) *subStream {
 	reqBuf, err := proto.Marshal(req)
 	if err != nil {
 		// Pretty sure this will never happen, so not worth making people check a return value.
@@ -70,7 +60,7 @@ func (d *HyperDHT) createStream(ctx context.Context, kind uint32, key []byte, op
 		Target:  key,
 		Value:   reqBuf,
 	}
-	switch kind {
+	switch req.GetType() {
 	case lookupType:
 		return d.dht.Query(ctx, query, nil)
 	case announceType:
@@ -79,41 +69,41 @@ func (d *HyperDHT) createStream(ctx context.Context, kind uint32, key []byte, op
 		return d.dht.Update(ctx, query, nil)
 	}
 	// Pretty sure this will never happen, so not worth making people check a return value.
-	panic(errors.Errorf("invalid stream type %d", kind))
+	panic(errors.Errorf("invalid stream type %d", req.GetType()))
 }
-func (d *HyperDHT) createMappedStream(ctx context.Context, kind uint32, key []byte, opts *QueryOpts) *QueryStream {
-	var localAddr []byte
-	if opts != nil {
-		localAddr = encodePeer(opts.LocalAddr)
+func (d *HyperDHT) createMappedStream(ctx context.Context, key []byte, req *PeerRequest) *QueryStream {
+	stream := d.createStream(ctx, key, req)
+	result := &QueryStream{stream, req.GetLocalAddress(), ctx, make(chan QueryResponse)}
+
+	if localRes := d.processPeers(req, d.dht.Addr(), key, false); localRes != nil {
+		go result.handleResponse(d.Addr(), localRes)
 	}
 
-	stream := d.createStream(ctx, kind, key, opts)
-	result := &QueryStream{stream, localAddr, ctx, make(chan QueryResponse)}
 	go result.runMap()
 	return result
 }
 
 // Lookup finds peers that have been added to the DHT using the specified key.
 func (d *HyperDHT) Lookup(ctx context.Context, key []byte, opts *QueryOpts) *QueryStream {
-	return d.createMappedStream(ctx, lookupType, key, opts)
+	return d.createMappedStream(ctx, key, createRequest(lookupType, opts))
 }
 
 // Announce adds this node to the DHT. Note that you should keep announcing yourself at
 // regular intervals (fx every 4-5 minutes).
 func (d *HyperDHT) Announce(ctx context.Context, key []byte, opts *QueryOpts) *QueryStream {
-	return d.createMappedStream(ctx, announceType, key, opts)
+	return d.createMappedStream(ctx, key, createRequest(announceType, opts))
 }
 
 // AnnounceDiscard is similar to Announce, except that it will block until the entire update
 // is complete and will discard all responses from the peers instead of processing and converting
 // them to the response type of this package.
 func (d *HyperDHT) AnnounceDiscard(ctx context.Context, key []byte, opts *QueryOpts) error {
-	return dhtRpc.DiscardStream(d.createStream(ctx, announceType, key, opts))
+	return dhtRpc.DiscardStream(d.createStream(ctx, key, createRequest(announceType, opts)))
 }
 
 // Unannounce removes this node from the DHT.
 func (d *HyperDHT) Unannounce(ctx context.Context, key []byte, opts *QueryOpts) error {
-	return dhtRpc.DiscardStream(d.createStream(ctx, unannounceType, key, opts))
+	return dhtRpc.DiscardStream(d.createStream(ctx, key, createRequest(unannounceType, opts)))
 }
 
 func (d *HyperDHT) onQuery(n dhtRpc.Node, q *dhtRpc.Query) ([]byte, error) {
@@ -251,6 +241,7 @@ func createLocalFilter(localAddr []byte) func(*peerInfo) bool {
 	if len(localAddr) != 6 {
 		return func(*peerInfo) bool { return false }
 	}
+
 	return func(info *peerInfo) bool {
 		if info.localPeer == nil || info.localFilter == nil {
 			return false
@@ -263,6 +254,19 @@ func createLocalFilter(localAddr []byte) func(*peerInfo) bool {
 		}
 		return true
 	}
+}
+
+func createRequest(kind uint32, opts *QueryOpts) *PeerRequest {
+	req := &PeerRequest{
+		Type: &kind,
+	}
+	if opts != nil {
+		req.LocalAddress = encodePeer(opts.LocalAddr)
+		if port := uint32(opts.Port); port != 0 {
+			req.Port = &port
+		}
+	}
+	return req
 }
 
 type alteredAddr struct {

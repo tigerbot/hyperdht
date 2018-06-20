@@ -57,24 +57,26 @@ func (s *QueryStream) runMap() {
 
 	for rawRes := range s.subStream.ResponseChan() {
 		var res PeerResponse
-		if err := proto.Unmarshal(rawRes.Value, &res); err != nil {
-			continue
+		if err := proto.Unmarshal(rawRes.Value, &res); err == nil {
+			s.handleResponse(rawRes.Node.Addr(), &res)
 		}
-		peers := decodeAllPeers(res.Peers)
-		if peers == nil {
-			continue
-		}
+	}
+}
+func (s *QueryStream) handleResponse(from net.Addr, res *PeerResponse) {
+	peers := decodeAllPeers(res.Peers)
+	if peers == nil {
+		return
+	}
 
-		qRes := QueryResponse{
-			Node:       rawRes.Node.Addr(),
-			Peers:      peers,
-			LocalPeers: decodeLocalPeers(s.localAddr, res.LocalPeers),
-		}
-		select {
-		case s.respChan <- qRes:
-		case <-s.ctx.Done():
-			return
-		}
+	qRes := QueryResponse{
+		Node:       from,
+		Peers:      peers,
+		LocalPeers: decodeLocalPeers(s.localAddr, res.LocalPeers),
+	}
+	select {
+	case s.respChan <- qRes:
+	case <-s.ctx.Done():
+		return
 	}
 }
 
