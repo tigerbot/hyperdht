@@ -1,0 +1,31 @@
+image: golang:1.9
+
+before_script:
+  - mkdir -p /go/src/gitlab.com/
+  - cp -r /builds/core-sdk /go/src/gitlab.com/core-sdk
+  - cd /go/src/gitlab.com/core-sdk/hyperdht
+  - go env # Just because the output can get helpfull
+  - go get -d -t ./...
+
+hyperdht:
+  script:
+    - mkdir cover
+
+    - go test . -covermode=count -coverprofile cover/hyperdht.out
+    - go test . -race
+
+    - go test ./dhtRpc -covermode=count -coverprofile cover/dht-rpc.out
+    - go test ./dhtRpc -race
+
+    - go test ./ipEncoding -covermode=count -coverprofile cover/ip-encoding.out
+    - go test ./ipEncoding -race
+
+    - go test ./kbucket -covermode=count -coverprofile cover/kbucket.out
+    - go test ./kbucket -race
+
+    - go test ./udpRequest -covermode=count -coverprofile cover/udp-request.out
+    - go test ./udpRequest -race
+
+    - echo "mode:count" > cover/total.out
+    - tail -q -n +2 cover/*.out >> cover/total.out
+    - go tool cover -func=cover/total.out
