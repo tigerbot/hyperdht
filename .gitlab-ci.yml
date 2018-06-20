@@ -7,25 +7,18 @@ before_script:
   - go env # Just because the output can get helpfull
   - go get -d -t ./...
 
-hyperdht:
-  script:
-    - mkdir cover
+coverage:
+  script: "bash -euc '
+    mkdir -p cover;
+    PKG_LIST=$(go list ./... | grep -v \"/cmd/\");
+    for pkg in ${PKG_LIST}; do
+      go test $pkg -covermode=count -coverprofile cover/${pkg##*/}.out ;
+    done;
 
-    - go test . -covermode=count -coverprofile cover/hyperdht.out
-    - go test . -race
+    echo \"mode: count\" > cover/total.cov;
+    tail -q -n +2 cover/*.out >> cover/total.cov;
+    go tool cover -func=cover/total.cov;
+  '"
 
-    - go test ./dhtRpc -covermode=count -coverprofile cover/dht-rpc.out
-    - go test ./dhtRpc -race
-
-    - go test ./ipEncoding -covermode=count -coverprofile cover/ip-encoding.out
-    - go test ./ipEncoding -race
-
-    - go test ./kbucket -covermode=count -coverprofile cover/kbucket.out
-    - go test ./kbucket -race
-
-    - go test ./udpRequest -covermode=count -coverprofile cover/udp-request.out
-    - go test ./udpRequest -race
-
-    - echo "mode:count" > cover/total.out
-    - tail -q -n +2 cover/*.out >> cover/total.out
-    - go tool cover -func=cover/total.out
+race:
+  script: go test ./... -race
