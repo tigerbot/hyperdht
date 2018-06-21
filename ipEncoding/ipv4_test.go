@@ -11,25 +11,26 @@ type customAddr string
 func (a customAddr) Network() string { return "test address" }
 func (a customAddr) String() string  { return string(a) }
 
-func TestIPv4Addr(t *testing.T) {
+func TestIPv4Encoder(t *testing.T) {
+	encoder := IPv4Encoder{}
 	type expectation struct {
 		addr net.Addr
 		buf  []byte
 	}
 
 	expected := []expectation{
-		{&net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 80}, []byte{127, 0, 0, 1, 0, 80}},
-		{&net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8080}, []byte{127, 0, 0, 1, 0x1f, 0x90}},
-		{&net.TCPAddr{IP: net.IPv4(192, 168, 1, 1), Port: 443}, []byte{192, 168, 1, 1, 0x01, 0xbb}},
-		{&net.TCPAddr{IP: net.IPv4(169, 254, 10, 1), Port: 2056}, []byte{169, 254, 10, 1, 0x08, 0x08}},
+		{&net.UDPAddr{IP: net.IP{127, 0, 0, 1}, Port: 80}, []byte{127, 0, 0, 1, 0, 80}},
+		{&net.UDPAddr{IP: net.IP{127, 0, 0, 1}, Port: 8080}, []byte{127, 0, 0, 1, 0x1f, 0x90}},
+		{&net.TCPAddr{IP: net.IP{192, 168, 1, 1}, Port: 443}, []byte{192, 168, 1, 1, 0x01, 0xbb}},
+		{&net.TCPAddr{IP: net.IP{169, 254, 10, 1}, Port: 2056}, []byte{169, 254, 10, 1, 0x08, 0x08}},
 		{customAddr("10.0.0.1:22"), []byte{10, 0, 0, 1, 0x00, 0x16}},
 		{customAddr("45.55.95.192:32754"), []byte{45, 55, 95, 192, 0x7f, 0xf2}},
 	}
 	for _, e := range expected {
-		if buf := encodeIPv4Addr(e.addr); !bytes.Equal(buf, e.buf) {
+		if buf := encoder.EncodeAddr(e.addr); !bytes.Equal(buf, e.buf) {
 			t.Errorf("%s encoded to %x, expected %x", e.addr, buf, e.buf)
 		}
-		if addr := decodeIPv4Addr(e.buf); addr.String() != e.addr.String() {
+		if addr := encoder.DecodeAddr(e.buf); addr.String() != e.addr.String() {
 			t.Errorf("%x decoded to %s, expected %s", e.buf, addr, e.addr)
 		}
 	}
@@ -37,27 +38,28 @@ func TestIPv4Addr(t *testing.T) {
 	// These are IPv6 or bad addresses, so even if the encoding succeeds, strings might not
 	// match between original and decoded address, so we don't run that test for these.
 	expected = []expectation{
-		{&net.UDPAddr{IP: net.IPv4(127, 0, 0, 1).To16(), Port: 8080}, []byte{127, 0, 0, 1, 0x1f, 0x90}},
-		{&net.TCPAddr{IP: net.IPv4(192, 168, 1, 1).To16(), Port: 443}, []byte{192, 168, 1, 1, 0x01, 0xbb}},
+		{&net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8080}, []byte{127, 0, 0, 1, 0x1f, 0x90}},
+		{&net.TCPAddr{IP: net.IPv4(192, 168, 1, 1), Port: 443}, []byte{192, 168, 1, 1, 0x01, 0xbb}},
 		{customAddr("[::ffff:10.0.0.1]:22"), []byte{10, 0, 0, 1, 0x00, 0x16}},
 		{customAddr("[::ffff:2d37:5fc0]:32754"), []byte{45, 55, 95, 192, 0x7f, 0xf2}},
 
 		{customAddr("[::1]:80"), nil},
 		{customAddr("/tmp/unix-socket-addr"), nil},
+		{nil, nil},
 	}
 	for _, e := range expected {
-		if buf := encodeIPv4Addr(e.addr); !bytes.Equal(buf, e.buf) {
+		if buf := encoder.EncodeAddr(e.addr); !bytes.Equal(buf, e.buf) {
 			t.Errorf("%s encoded to %x, expected %x", e.addr, buf, e.buf)
 		}
 	}
 
-	if addr := decodeIPv4Addr([]byte{192, 168, 254, 254}); addr != nil {
+	if addr := encoder.DecodeAddr([]byte{192, 168, 254, 254}); addr != nil {
 		t.Errorf("decoded bad length buffer produced %q, expected <nil>", addr)
 	}
 }
 
-func TestIPv4Encoder(t *testing.T) {
-	const enc = IPv4Encoder(2)
+func TestIPv4NodeEncoder(t *testing.T) {
+	enc := NodeEncoder{IPEncoder: IPv4Encoder{}, IDSize: 2}
 
 	input := []Node{
 		BasicNode{MyID: []byte{0x00, 0x00}, MyAddr: customAddr("192.168.1.1:4278")},
@@ -79,7 +81,7 @@ func TestIPv4Encoder(t *testing.T) {
 				t.Errorf("output node %d has ID %x, expected %x", i, id1, id2)
 			}
 			if a1, a2 := output[i].Addr(), expected[i].Addr(); a1.String() != a2.String() {
-				t.Errorf("output node %d has adress %q, expected %q", i, a1, a2)
+				t.Errorf("output node %d has address %q, expected %q", i, a1, a2)
 			}
 		}
 	}

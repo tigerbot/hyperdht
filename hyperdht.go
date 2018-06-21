@@ -191,21 +191,10 @@ func NewWithDHT(dht *dhtRpc.DHT) *HyperDHT {
 	return result
 }
 
-const peerEnc = ipEncoding.IPv4Encoder(0)
+var peerEnc = ipEncoding.NodeEncoder{IPEncoder: ipEncoding.IPv4Encoder{}}
 
-func encodePeer(addr net.Addr) []byte {
-	if addr == nil {
-		return nil
-	}
-	list := []ipEncoding.Node{ipEncoding.BasicNode{MyAddr: addr}}
-	return peerEnc.Encode(list)
-}
-func decodePeer(buf []byte) net.Addr {
-	if list := peerEnc.Decode(buf); len(list) > 0 {
-		return list[0].Addr()
-	}
-	return nil
-}
+func encodePeer(addr net.Addr) []byte { return peerEnc.EncodeAddr(addr) }
+func decodePeer(buf []byte) net.Addr  { return peerEnc.DecodeAddr(buf) }
 
 func decodeAllPeers(buf []byte) []net.Addr {
 	list := peerEnc.Decode(buf)

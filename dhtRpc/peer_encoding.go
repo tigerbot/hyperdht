@@ -7,22 +7,13 @@ import (
 	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
 )
 
-const (
-	peerEnc = ipEncoding.IPv4Encoder(0)
-	nodeEnc = ipEncoding.IPv4Encoder(IDSize)
-)
+var nodeEnc = ipEncoding.NodeEncoder{
+	IPEncoder: ipEncoding.IPv4Encoder{},
+	IDSize:    IDSize,
+}
 
-func encodePeer(addr net.Addr) []byte {
-	list := []ipEncoding.Node{basicNode{addr: addr}}
-	return peerEnc.Encode(list)
-}
-func decodePeer(buf []byte) net.Addr {
-	list := peerEnc.Decode(buf)
-	if len(list) > 0 {
-		return list[0].Addr()
-	}
-	return nil
-}
+func encodePeer(addr net.Addr) []byte { return nodeEnc.EncodeAddr(addr) }
+func decodePeer(buf []byte) net.Addr  { return nodeEnc.DecodeAddr(buf) }
 
 func encodeNodes(nodes []kbucket.Contact) []byte {
 	list := make([]ipEncoding.Node, 0, len(nodes))
@@ -34,6 +25,4 @@ func encodeNodes(nodes []kbucket.Contact) []byte {
 
 	return nodeEnc.Encode(list)
 }
-func decodeNodes(buf []byte) []ipEncoding.Node {
-	return nodeEnc.Decode(buf)
-}
+func decodeNodes(buf []byte) []ipEncoding.Node { return nodeEnc.Decode(buf) }

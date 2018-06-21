@@ -1,3 +1,4 @@
+// Package ipEncoding converts between IP addresses (with ports) and binary buffers.
 package ipEncoding
 
 import (
@@ -5,105 +6,90 @@ import (
 	"strconv"
 )
 
-// A Node represents any value that can be encoded using this package.
-type Node interface {
-	ID() []byte
-	Addr() net.Addr
+// A IPEncoder encodes/decodes network address to a specific binary representation.
+type IPEncoder interface {
+	EncodeAddr(net.Addr) []byte
+	DecodeAddr([]byte) net.Addr
+
+	// EncodedLen should return the bytes used to encode a single address.
+	EncodedLen() int
 }
 
-// BasicNode is a simple struct that implements the Node interface. It is also the type
-// used in the slice when decoding.
-type BasicNode struct {
-	MyID   []byte
-	MyAddr net.Addr
-}
+// IPv4Encoder is an implementation of IPEncoder that encodes the IP address as 4 bytes and the
+// port as 2 bytes.
+type IPv4Encoder struct{}
 
-// ID implements the Node interface
-func (n BasicNode) ID() []byte { return n.MyID }
+// IPv6Encoder is an implementation of IPEncoder that encodes the IP address as 16 bytes and the
+// port as 2 bytes.
+type IPv6Encoder struct{}
 
-// Addr implements the Node interface
-func (n BasicNode) Addr() net.Addr { return n.MyAddr }
+var _, _ IPEncoder = IPv4Encoder{}, IPv6Encoder{}
 
-func encodeIPv4Addr(peer net.Addr) []byte {
-	var host net.IP
-	var port int
-	if udp, ok := peer.(*net.UDPAddr); ok {
-		host, port = udp.IP, udp.Port
+func extractHostPort(peer net.Addr) (net.IP, int) {
+	if peer == nil {
+		return nil, 0
+	} else if udp, ok := peer.(*net.UDPAddr); ok {
+		return udp.IP, udp.Port
 	} else if tcp, ok := peer.(*net.TCPAddr); ok {
-		host, port = tcp.IP, tcp.Port
-	} else {
-		if hostStr, portStr, err := net.SplitHostPort(peer.String()); err != nil {
-			// TODO? log these kinds of errors
-		} else {
-			host = net.ParseIP(hostStr)
-			port64, _ := strconv.ParseInt(portStr, 10, 32)
-			port = int(port64)
-		}
+		return tcp.IP, tcp.Port
+	} else if hostStr, portStr, err := net.SplitHostPort(peer.String()); err == nil {
+		port64, _ := strconv.ParseInt(portStr, 10, 32)
+		return net.ParseIP(hostStr), int(port64)
 	}
+	return nil, 0
+}
 
-	if host == nil || port == 0 || host.To4() == nil {
+func writePort(buf []byte, port int) { buf[0], buf[1] = byte((port&0xff00)>>8), byte(port&0x00ff) }
+func readPort(buf []byte) int        { return int(buf[0])<<8 | int(buf[1]) }
+
+// EncodeAddr implements IPEncoder.EncodeAddr. If the address is not an IPv4 address or an IPv6
+// encoded version of an IPv4 address it will return nil.
+func (e IPv4Encoder) EncodeAddr(peer net.Addr) []byte {
+	host, port := extractHostPort(peer)
+	host = host.To4() // this is safe to call on nil IP addresses
+	if port == 0 || host == nil || host.IsUnspecified() {
 		return nil
 	}
-	buf := make([]byte, 6)
-	copy(buf, host.To4())
-	buf[4], buf[5] = byte((port&0xff00)>>8), byte(port&0x00ff)
+	buf := make([]byte, e.EncodedLen())
+	copy(buf, host)
+	writePort(buf[net.IPv4len:], port)
 	return buf
 }
 
-func decodeIPv4Addr(buf []byte) net.Addr {
-	if len(buf) != 6 {
+// DecodeAddr implements IPEncoder.DecodeAddr and reverses EncodeAddr. If the buffer is not
+// exactly what's returned by EncodedLen it will return nil.
+func (e IPv4Encoder) DecodeAddr(buf []byte) net.Addr {
+	if len(buf) != e.EncodedLen() {
 		return nil
 	}
-	return &net.UDPAddr{
-		IP:   net.IP(buf[:4]),
-		Port: int(buf[4])<<8 | int(buf[5]),
-	}
+	return &net.UDPAddr{IP: net.IP(buf[:net.IPv4len]), Port: readPort(buf[net.IPv4len:])}
 }
 
-// IPv4Encoder converts back and forth between Nodes and their binary encoding. The IPv4Encoder
-// value represents the number of bytes expected as the ID.
-type IPv4Encoder int
+// EncodedLen implements IPEncoder.EncodedLen and returns 6.
+func (e IPv4Encoder) EncodedLen() int { return net.IPv4len + 2 }
 
-// Encode converts the list of provided nodes to their binary encoding. Since this is an IPv4
-// encoder any nodes that have IPv6 addresses are unsupported and are simply excluded from
-// the final encoding. Likewise any nodes whose ID length does not match the value for the
-// encoder are excluded.
-func (e IPv4Encoder) Encode(nodes []Node) []byte {
-	idSize := int(e)
-	totalSize := idSize + 6
-
-	buf := make([]byte, 0, len(nodes)*totalSize)
-	for _, node := range nodes {
-		if id := node.ID(); len(id) != idSize {
-			// TODO? log this as some sort of warning
-		} else if enc := encodeIPv4Addr(node.Addr()); enc == nil {
-			// TODO? log this as some sort of warning
-		} else {
-			buf = append(buf, id...)
-			buf = append(buf, enc...)
-		}
+// EncodeAddr implements IPEncoder.EncodeAddr. If the address is not an IP it will return nil.
+func (e IPv6Encoder) EncodeAddr(peer net.Addr) []byte {
+	host, port := extractHostPort(peer)
+	host = host.To16() // this is safe to call on nil IP addresses
+	if port == 0 || host == nil || host.IsUnspecified() {
+		return nil
 	}
+
+	buf := make([]byte, e.EncodedLen())
+	copy(buf, host)
+	writePort(buf[net.IPv6len:], port)
 	return buf
 }
 
-// Decode converts the binary buffer to a list of Nodes. If the length of the buffer is not
-// exactly a length that is possible given the ID size it cannot be sure the buffer is actually
-// encoded peers and will return nil.
-func (e IPv4Encoder) Decode(buf []byte) []Node {
-	idSize := int(e)
-	totalSize := idSize + 6
-	if l := len(buf); l == 0 || l%totalSize != 0 {
+// DecodeAddr implements IPEncoder.DecodeAddr and reverses EncodeAddr. If the buffer is not
+// exactly what's returned by EncodedLen it will return nil.
+func (e IPv6Encoder) DecodeAddr(buf []byte) net.Addr {
+	if len(buf) != e.EncodedLen() {
 		return nil
 	}
-
-	result := make([]Node, len(buf)/totalSize)
-	for i := range result {
-		start := i * totalSize
-		node := BasicNode{MyID: make([]byte, idSize)}
-		copy(node.MyID, buf[start:start+idSize])
-		node.MyAddr = decodeIPv4Addr(buf[start+idSize : start+totalSize])
-		result[i] = node
-	}
-
-	return result
+	return &net.UDPAddr{IP: net.IP(buf[:net.IPv6len]), Port: readPort(buf[net.IPv6len:])}
 }
+
+// EncodedLen implements IPEncoder.EncodedLen and returns 18.
+func (e IPv6Encoder) EncodedLen() int { return net.IPv6len + 2 }
