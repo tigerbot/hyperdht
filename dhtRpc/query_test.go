@@ -129,16 +129,22 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 		defer wait.Done()
 
 		if err := node.Bootstrap(ctx); err != nil {
-			t.Errorf("failed to bootstrap server node #%d: %v", ind, err)
-			atomic.AddInt32(&failCnt, 1)
+			if cnt := atomic.AddInt32(&failCnt, 1); cnt < 9 {
+				t.Errorf("failed to bootstrap server node #%d: %v", ind, err)
+			} else if cnt == 9 {
+				t.Log("too many errors, suppressing logs for the remains errors")
+			}
 		}
 	}
 
 	wait.Add(size)
 	for i := 0; i < size; i++ {
 		if node, err := New(cfg); err != nil {
-			t.Errorf("failed to create server node #%d: %v", i, err)
-			atomic.AddInt32(&failCnt, 1)
+			if cnt := atomic.AddInt32(&failCnt, 1); cnt < 9 {
+				t.Errorf("failed to create server node #%d: %v", i, err)
+			} else if cnt == 9 {
+				t.Log("too many errors, suppressing logs for the remains errors")
+			}
 			wait.Done()
 		} else {
 			result.servers = append(result.servers, node)
@@ -182,8 +188,7 @@ func testQuery(t *testing.T, pair *dhtPair, update bool, query *Query, opts *Que
 		}
 	}
 }
-func TestSimpleQueryIPv4(t *testing.T) { simpleQueryTest(t, false) }
-func TestSimpleQueryIPv6(t *testing.T) { simpleQueryTest(t, true) }
+func TestSimpleQuery(t *testing.T) { simpleQueryTest(t, false) }
 func simpleQueryTest(t *testing.T, ipv6 bool) {
 	pair := createDHTPair(t, ipv6)
 	defer pair.Close()
@@ -216,8 +221,7 @@ func simpleQueryTest(t *testing.T, ipv6 bool) {
 	testQuery(t, pair, false, &query, nil, []byte("this is not the world"))
 }
 
-func TestSimpleUpdateIPv4(t *testing.T) { simpleUpdateTest(t, false) }
-func TestSimpleUpdateIPv6(t *testing.T) { simpleUpdateTest(t, true) }
+func TestSimpleUpdate(t *testing.T) { simpleUpdateTest(t, false) }
 func simpleUpdateTest(t *testing.T, ipv6 bool) {
 	pair := createDHTPair(t, ipv6)
 	defer pair.Close()
@@ -240,8 +244,7 @@ func simpleUpdateTest(t *testing.T, ipv6 bool) {
 	testQuery(t, pair, true, &update, nil, update.Value)
 }
 
-func TestTargetedQueryIPv4(t *testing.T) { targetedQueryTest(t, false) }
-func TestTargetedQueryIPv6(t *testing.T) { targetedQueryTest(t, true) }
+func TestTargetedQuery(t *testing.T) { targetedQueryTest(t, false) }
 func targetedQueryTest(t *testing.T, ipv6 bool) {
 	pair := createDHTPair(t, ipv6)
 	defer pair.Close()
@@ -287,8 +290,7 @@ func targetedQueryTest(t *testing.T, ipv6 bool) {
 	testQuery(t, pair, false, &query, opts, []byte("world"))
 }
 
-func TestTargetedUpdateIPv4(t *testing.T) { targetedUpdateTest(t, false) }
-func TestTargetedUpdateIPv6(t *testing.T) { targetedUpdateTest(t, true) }
+func TestTargetedUpdate(t *testing.T) { targetedUpdateTest(t, false) }
 func targetedUpdateTest(t *testing.T, ipv6 bool) {
 	pair := createDHTPair(t, ipv6)
 	defer pair.Close()
@@ -344,8 +346,7 @@ func targetedUpdateTest(t *testing.T, ipv6 bool) {
 	testQuery(t, pair, true, &update, opts, update.Value)
 }
 
-func TestDHTRateLimitIPv4(t *testing.T) { dHTRateLimitTest(t, false) }
-func TestDHTRateLimitIPv6(t *testing.T) { dHTRateLimitTest(t, true) }
+func TestDHTRateLimit(t *testing.T) { dHTRateLimitTest(t, false) }
 func dHTRateLimitTest(t *testing.T, ipv6 bool) {
 	// We need a swarm so the query stream has more than one peer to query at a time.
 	swarm := createSwarm(t, 128, ipv6)
@@ -396,8 +397,7 @@ func dHTRateLimitTest(t *testing.T, ipv6 bool) {
 	}
 }
 
-func TestQueryRateLimitIPv4(t *testing.T) { queryRateLimitTest(t, false) }
-func TestQueryRateLimitIPv6(t *testing.T) { queryRateLimitTest(t, true) }
+func TestQueryRateLimit(t *testing.T) { queryRateLimitTest(t, false) }
 func queryRateLimitTest(t *testing.T, ipv6 bool) {
 	// We need a swarm so the query stream has more than one peer to query at a time.
 	swarm := createSwarm(t, 128, ipv6)
@@ -443,8 +443,7 @@ func queryRateLimitTest(t *testing.T, ipv6 bool) {
 	}
 }
 
-func TestSwarmQueryIPv4(t *testing.T) { swarmQueryTest(t, false) }
-func TestSwarmQueryIPv6(t *testing.T) { swarmQueryTest(t, true) }
+func TestSwarmQuery(t *testing.T) { swarmQueryTest(t, false) }
 func swarmQueryTest(t *testing.T, ipv6 bool) {
 	swarm := createSwarm(t, 256, ipv6)
 	defer swarm.Close()
@@ -494,9 +493,8 @@ func swarmQueryTest(t *testing.T, ipv6 bool) {
 	}
 }
 
-func TestNonephemeralBootstrapIPv4(t *testing.T) { nonephemeralBootstrapTest(t, false) }
-func TestNonephemeralBootstrapIPv6(t *testing.T) { nonephemeralBootstrapTest(t, true) }
-func nonephemeralBootstrapTest(t *testing.T, ipv6 bool) {
+func TestNonEphemeralBootstrap(t *testing.T) { nonEphemeralBootstrapTest(t, false) }
+func nonEphemeralBootstrapTest(t *testing.T, ipv6 bool) {
 	swarm := createSwarm(t, 32, ipv6)
 	defer swarm.Close()
 
@@ -530,4 +528,48 @@ func nonephemeralBootstrapTest(t *testing.T, ipv6 bool) {
 	if _, err := CollectStream(swarm.client.Update(ctx, &query, nil)); err != nil {
 		t.Error("query errored:", err)
 	}
+}
+
+func TestIPv6(t *testing.T) {
+	// It seems it's really difficult to get the docker containers used by our CI test server
+	// to support IPv6 for more than a single container, so we make these tests conditional.
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatal("failed to check interfaces for IPv6 support:", err)
+	}
+	loopbackFlag := net.FlagUp | net.FlagLoopback
+	var ipv6Support bool
+	for _, iface := range ifaces {
+		if iface.Flags&loopbackFlag != loopbackFlag {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			t.Fatalf("failed to get addresses from interface %v: %v", iface.Name, err)
+		}
+		for _, addr := range addrs {
+			if netAddr, ok := addr.(*net.IPNet); !ok {
+				t.Errorf("interface returned address of type %T, expected %T", addr, netAddr)
+			} else if netAddr.IP.Equal(net.IPv6loopback) {
+				ipv6Support = true
+			}
+		}
+	}
+	if !ipv6Support {
+		t.Skip("device doesn't appear to have an IPv6 loopback addr")
+	}
+
+	wrap := func(f func(*testing.T, bool)) func(*testing.T) {
+		return func(t *testing.T) {
+			f(t, true)
+		}
+	}
+	t.Run("simple-query", wrap(simpleQueryTest))
+	t.Run("simple-update", wrap(simpleUpdateTest))
+	t.Run("targeted-query", wrap(targetedQueryTest))
+	t.Run("targeted-update", wrap(targetedUpdateTest))
+	t.Run("dht-rate-limit", wrap(dHTRateLimitTest))
+	t.Run("query-rate-limit", wrap(queryRateLimitTest))
+	t.Run("swarm-query", wrap(swarmQueryTest))
+	t.Run("non-ephemeral-bootstrap", wrap(nonEphemeralBootstrapTest))
 }

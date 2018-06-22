@@ -79,8 +79,7 @@ func createPair(t *testing.T, ipv6 bool) *dhtPair {
 
 	return result
 }
-func TestHyperDHTBasicIPv4(t *testing.T) { hyperDHTBasicTest(t, false) }
-func TestHyperDHTBasicIPv6(t *testing.T) { hyperDHTBasicTest(t, true) }
+func TestHyperDHTBasic(t *testing.T) { hyperDHTBasicTest(t, false) }
 func hyperDHTBasicTest(t *testing.T, ipv6 bool) {
 	pair := createPair(t, ipv6)
 	defer pair.Close()
@@ -135,8 +134,8 @@ func hyperDHTBasicTest(t *testing.T, ipv6 bool) {
 	runQuery("client post-unannounce", pair.client, false)
 	runQuery("bootstrap post-unannounce", pair.bootstrap, false)
 }
-func hyperDHTLocalIPv4Test(t *testing.T) { hyperDHTLocalTest(t, false) }
-func TestHyperDHTLocalIPv6(t *testing.T) { hyperDHTLocalTest(t, true) }
+
+func TestHyperDHTLocal(t *testing.T) { hyperDHTLocalTest(t, false) }
 func hyperDHTLocalTest(t *testing.T, ipv6 bool) {
 	pair := createPair(t, ipv6)
 	defer pair.Close()
@@ -208,4 +207,42 @@ func TestPortOverride(t *testing.T) {
 			t.Errorf("lookup returned peer %s, expected 127.0.0.1:4321", resp.Peers[0])
 		}
 	}
+}
+
+func TestIPv6(t *testing.T) {
+	// It seems it's really difficult to get the docker containers used by our CI test server
+	// to support IPv6 for more than a single container, so we make these tests conditional.
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatal("failed to check interfaces for IPv6 support:", err)
+	}
+	loopbackFlag := net.FlagUp | net.FlagLoopback
+	var ipv6Support bool
+	for _, iface := range ifaces {
+		if iface.Flags&loopbackFlag != loopbackFlag {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			t.Fatalf("failed to get addresses from interface %v: %v", iface.Name, err)
+		}
+		for _, addr := range addrs {
+			if netAddr, ok := addr.(*net.IPNet); !ok {
+				t.Errorf("interface returned address of type %T, expected %T", addr, netAddr)
+			} else if netAddr.IP.Equal(net.IPv6loopback) {
+				ipv6Support = true
+			}
+		}
+	}
+	if !ipv6Support {
+		t.Skip("device doesn't appear to have an IPv6 loopback addr")
+	}
+
+	wrap := func(f func(*testing.T, bool)) func(*testing.T) {
+		return func(t *testing.T) {
+			f(t, true)
+		}
+	}
+	t.Run("dht-basic", wrap(hyperDHTBasicTest))
+	t.Run("dht-local", wrap(hyperDHTLocalTest))
 }
