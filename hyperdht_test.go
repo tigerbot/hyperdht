@@ -53,11 +53,11 @@ func (s *dhtPair) Close() {
 	}
 }
 
-func createPair(ipv6 bool) *dhtPair {
+func createPair(t *testing.T, ipv6 bool) *dhtPair {
 	result := new(dhtPair)
 	var err error
 	if result.bootstrap, err = New(&dhtRpc.Config{IPv6: ipv6}); err != nil {
-		panic(err)
+		t.Fatal("failed to create bootstrap node:", err)
 	}
 	cfg := &dhtRpc.Config{
 		BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr(), ipv6)},
@@ -67,14 +67,14 @@ func createPair(ipv6 bool) *dhtPair {
 	defer done()
 
 	if result.server, err = New(cfg); err != nil {
-		panic(err)
+		t.Fatal("failed to create server node:", err)
 	} else if err = result.server.Bootstrap(ctx); err != nil {
-		panic(err)
+		t.Fatal("failed to bootstrap server node:", err)
 	}
 
 	cfg.Ephemeral = true
 	if result.client, err = New(cfg); err != nil {
-		panic(err)
+		t.Fatal("failed to create client node:", err)
 	}
 
 	return result
@@ -82,7 +82,7 @@ func createPair(ipv6 bool) *dhtPair {
 func TestHyperDHTBasicIPv4(t *testing.T) { hyperDHTBasicTest(t, false) }
 func TestHyperDHTBasicIPv6(t *testing.T) { hyperDHTBasicTest(t, true) }
 func hyperDHTBasicTest(t *testing.T, ipv6 bool) {
-	pair := createPair(ipv6)
+	pair := createPair(t, ipv6)
 	defer pair.Close()
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
@@ -138,7 +138,7 @@ func hyperDHTBasicTest(t *testing.T, ipv6 bool) {
 func hyperDHTLocalIPv4Test(t *testing.T) { hyperDHTLocalTest(t, false) }
 func TestHyperDHTLocalIPv6(t *testing.T) { hyperDHTLocalTest(t, true) }
 func hyperDHTLocalTest(t *testing.T, ipv6 bool) {
-	pair := createPair(ipv6)
+	pair := createPair(t, ipv6)
 	defer pair.Close()
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
@@ -183,7 +183,7 @@ func hyperDHTLocalTest(t *testing.T, ipv6 bool) {
 }
 
 func TestPortOverride(t *testing.T) {
-	pair := createPair(false)
+	pair := createPair(t, false)
 	defer pair.Close()
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()

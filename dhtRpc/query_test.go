@@ -55,11 +55,11 @@ func (p *dhtPair) Close() {
 	}
 }
 
-func createDHTPair(ipv6 bool) *dhtPair {
+func createDHTPair(t *testing.T, ipv6 bool) *dhtPair {
 	result := new(dhtPair)
 	var err error
 	if result.bootstrap, err = New(&Config{Ephemeral: true, IPv6: ipv6}); err != nil {
-		panic(err)
+		t.Fatal("failed to create bootstrap node:", err)
 	}
 
 	cfg := &Config{
@@ -69,12 +69,12 @@ func createDHTPair(ipv6 bool) *dhtPair {
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
 	if result.server, err = New(cfg); err != nil {
-		panic(err)
+		t.Fatal("failed to create server node:", err)
 	} else if err = result.server.Bootstrap(ctx); err != nil {
-		panic(err)
+		t.Fatal("failed to bootstrap server node:", err)
 	}
 	if result.client, err = New(cfg); err != nil {
-		panic(err)
+		t.Fatal("failed to create client node:", err)
 	}
 
 	return result
@@ -106,11 +106,11 @@ func (s *dhtSwarm) Close() {
 	}
 }
 
-func createSwarm(size int, ipv6 bool) *dhtSwarm {
+func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 	result := new(dhtSwarm)
 	var err error
 	if result.bootstrap, err = New(&Config{Ephemeral: true, IPv6: ipv6}); err != nil {
-		panic(err)
+		t.Fatal("failed to create bootstrap node:", err)
 	}
 
 	cfg := &Config{
@@ -124,27 +124,34 @@ func createSwarm(size int, ipv6 bool) *dhtSwarm {
 	ctx, done := context.WithTimeout(context.Background(), time.Minute)
 	defer done()
 	var wait sync.WaitGroup
-	start := func(node *DHT) {
+	var failCnt int32
+	start := func(ind int, node *DHT) {
 		defer wait.Done()
 
 		if err := node.Bootstrap(ctx); err != nil {
-			panic(err)
+			t.Errorf("failed to bootstrap server node #%d: %v", ind, err)
+			atomic.AddInt32(&failCnt, 1)
 		}
 	}
 
 	wait.Add(size)
 	for i := 0; i < size; i++ {
 		if node, err := New(cfg); err != nil {
-			panic(err)
+			t.Errorf("failed to create server node #%d: %v", i, err)
+			atomic.AddInt32(&failCnt, 1)
+			wait.Done()
 		} else {
 			result.servers = append(result.servers, node)
-			go start(node)
+			go start(i, node)
 		}
 	}
 	wait.Wait()
+	if failCnt > 0 {
+		t.Fatalf("failed to create/bootstrap %d of the server nodes", failCnt)
+	}
 
 	if result.client, err = New(cfg); err != nil {
-		panic(err)
+		t.Fatal("failed to create the client node:", err)
 	}
 
 	return result
@@ -178,7 +185,7 @@ func testQuery(t *testing.T, pair *dhtPair, update bool, query *Query, opts *Que
 func TestSimpleQueryIPv4(t *testing.T) { simpleQueryTest(t, false) }
 func TestSimpleQueryIPv6(t *testing.T) { simpleQueryTest(t, true) }
 func simpleQueryTest(t *testing.T, ipv6 bool) {
-	pair := createDHTPair(ipv6)
+	pair := createDHTPair(t, ipv6)
 	defer pair.Close()
 
 	query := Query{
@@ -212,7 +219,7 @@ func simpleQueryTest(t *testing.T, ipv6 bool) {
 func TestSimpleUpdateIPv4(t *testing.T) { simpleUpdateTest(t, false) }
 func TestSimpleUpdateIPv6(t *testing.T) { simpleUpdateTest(t, true) }
 func simpleUpdateTest(t *testing.T, ipv6 bool) {
-	pair := createDHTPair(ipv6)
+	pair := createDHTPair(t, ipv6)
 	defer pair.Close()
 
 	update := Query{
@@ -236,7 +243,7 @@ func simpleUpdateTest(t *testing.T, ipv6 bool) {
 func TestTargetedQueryIPv4(t *testing.T) { targetedQueryTest(t, false) }
 func TestTargetedQueryIPv6(t *testing.T) { targetedQueryTest(t, true) }
 func targetedQueryTest(t *testing.T, ipv6 bool) {
-	pair := createDHTPair(ipv6)
+	pair := createDHTPair(t, ipv6)
 	defer pair.Close()
 
 	serverB, err := New(&Config{BootStrap: pair.server.bootstrap})
@@ -283,7 +290,7 @@ func targetedQueryTest(t *testing.T, ipv6 bool) {
 func TestTargetedUpdateIPv4(t *testing.T) { targetedUpdateTest(t, false) }
 func TestTargetedUpdateIPv6(t *testing.T) { targetedUpdateTest(t, true) }
 func targetedUpdateTest(t *testing.T, ipv6 bool) {
-	pair := createDHTPair(ipv6)
+	pair := createDHTPair(t, ipv6)
 	defer pair.Close()
 
 	serverB, err := New(&Config{BootStrap: pair.server.bootstrap})
@@ -341,7 +348,7 @@ func TestDHTRateLimitIPv4(t *testing.T) { dHTRateLimitTest(t, false) }
 func TestDHTRateLimitIPv6(t *testing.T) { dHTRateLimitTest(t, true) }
 func dHTRateLimitTest(t *testing.T, ipv6 bool) {
 	// We need a swarm so the query stream has more than one peer to query at a time.
-	swarm := createSwarm(128, ipv6)
+	swarm := createSwarm(t, 128, ipv6)
 	defer swarm.Close()
 	for _, s := range swarm.servers {
 		s.OnQuery("", func(Node, *Query) ([]byte, error) {
@@ -393,7 +400,7 @@ func TestQueryRateLimitIPv4(t *testing.T) { queryRateLimitTest(t, false) }
 func TestQueryRateLimitIPv6(t *testing.T) { queryRateLimitTest(t, true) }
 func queryRateLimitTest(t *testing.T, ipv6 bool) {
 	// We need a swarm so the query stream has more than one peer to query at a time.
-	swarm := createSwarm(128, ipv6)
+	swarm := createSwarm(t, 128, ipv6)
 	defer swarm.Close()
 	for _, s := range swarm.servers {
 		s.OnQuery("", func(Node, *Query) ([]byte, error) {
@@ -439,7 +446,7 @@ func queryRateLimitTest(t *testing.T, ipv6 bool) {
 func TestSwarmQueryIPv4(t *testing.T) { swarmQueryTest(t, false) }
 func TestSwarmQueryIPv6(t *testing.T) { swarmQueryTest(t, true) }
 func swarmQueryTest(t *testing.T, ipv6 bool) {
-	swarm := createSwarm(256, ipv6)
+	swarm := createSwarm(t, 256, ipv6)
 	defer swarm.Close()
 
 	var closest int32
@@ -490,7 +497,7 @@ func swarmQueryTest(t *testing.T, ipv6 bool) {
 func TestNonephemeralBootstrapIPv4(t *testing.T) { nonephemeralBootstrapTest(t, false) }
 func TestNonephemeralBootstrapIPv6(t *testing.T) { nonephemeralBootstrapTest(t, true) }
 func nonephemeralBootstrapTest(t *testing.T, ipv6 bool) {
-	swarm := createSwarm(32, ipv6)
+	swarm := createSwarm(t, 32, ipv6)
 	defer swarm.Close()
 
 	if nodes := swarm.client.Nodes(); len(nodes) > 0 {
