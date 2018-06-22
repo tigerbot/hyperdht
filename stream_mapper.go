@@ -7,6 +7,7 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
+	"gitlab.daplie.com/core-sdk/hyperdht/ipEncoding"
 )
 
 // QueryOpts contains all of the options that can be included in a Lookup or Announce query.
@@ -14,6 +15,7 @@ type QueryOpts struct {
 	// LocalAddr is the address the service is listening on in the local network. If non-nil
 	// it will assume your CIDR is 16 and include any peers that announced being on a local
 	// address in the same subnet in the LocalPeers part of the response.
+	// It currently only supports IPv4 addresses, even if the hyperdht node can use IPv6
 	LocalAddr net.Addr
 
 	// Specifying a non-zero port will tell the remote peers to store an address using this
@@ -41,6 +43,7 @@ type subStream = dhtRpc.QueryStream
 type QueryStream struct {
 	*subStream
 	localAddr []byte
+	encoder   ipEncoding.IPEncoder
 
 	ctx      context.Context
 	respChan chan QueryResponse
@@ -56,7 +59,7 @@ func (s *QueryStream) runMap(selfAddr net.Addr, selfRes *PeerResponse) {
 	defer close(s.respChan)
 
 	handleResponse := func(from net.Addr, res *PeerResponse) {
-		peers := decodeAllPeers(res.Peers)
+		peers := s.decodeAllPeers(res.Peers)
 		if peers == nil {
 			return
 		}
@@ -64,7 +67,7 @@ func (s *QueryStream) runMap(selfAddr net.Addr, selfRes *PeerResponse) {
 		qRes := QueryResponse{
 			Node:       from,
 			Peers:      peers,
-			LocalPeers: decodeLocalPeers(s.localAddr, res.LocalPeers),
+			LocalPeers: s.decodeLocalPeers(res.LocalPeers),
 		}
 		select {
 		case s.respChan <- qRes:
@@ -82,6 +85,33 @@ func (s *QueryStream) runMap(selfAddr net.Addr, selfRes *PeerResponse) {
 			handleResponse(rawRes.Node.Addr(), &res)
 		}
 	}
+}
+
+func (s *QueryStream) decodeAllPeers(buf []byte) []net.Addr {
+	encLen := s.encoder.EncodedLen()
+	if l := len(buf); l == 0 || l%encLen != 0 {
+		return nil
+	}
+
+	result := make([]net.Addr, len(buf)/encLen)
+	for i := range result {
+		result[i], buf = s.encoder.DecodeAddr(buf[:encLen]), buf[encLen:]
+	}
+	return result
+}
+func (s *QueryStream) decodeLocalPeers(buf []byte) []net.Addr {
+	if len(s.localAddr) != 6 || len(buf) == 0 || len(buf)%4 != 0 {
+		return nil
+	}
+
+	cp := make([]byte, 6)
+	copy(cp, s.localAddr[:2])
+	list := make([]net.Addr, len(buf)/4)
+	for i := range list {
+		cp = append(cp[:2], buf[4*i:4*(i+1)]...)
+		list[i] = ipEncoding.IPv4Encoder{}.DecodeAddr(cp)
+	}
+	return list
 }
 
 // CollectStream reads from a QueryStream's channels until the query is complete and returns

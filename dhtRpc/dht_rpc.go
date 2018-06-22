@@ -15,6 +15,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 
+	"gitlab.daplie.com/core-sdk/hyperdht/ipEncoding"
 	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
 	"gitlab.daplie.com/core-sdk/hyperdht/udpRequest"
 )
@@ -37,11 +38,12 @@ type QueryHandler func(Node, *Query) ([]byte, error)
 
 // Config contains all of the options available for a DHT instance
 type Config struct {
-	ID          []byte
-	Ephemeral   bool
-	Concurrency int
-	BootStrap   []net.Addr
-	Nodes       []Node
+	ID          []byte     // ID of the node. If nil, one will be randomly generated
+	Ephemeral   bool       // Will this node be stored by other nodes?
+	Concurrency int        // How many requests can be pending at a time
+	BootStrap   []net.Addr // Bootstrap node addresses
+	Nodes       []Node     // Initial node list
+	IPv6        bool       // Will the node use IPv6 encoding instead of IPv4. Incompatible with nodes using IPv4 encoding.
 
 	// Allows for custom socket types or instances to be used. If Socket is nil a new net.UDPConn
 	// is created that will listen on the specified port.
@@ -54,6 +56,7 @@ type DHT struct {
 	id        [IDSize]byte
 	queryID   []byte
 	bootstrap []net.Addr
+	encoder   ipEncoding.NodeEncoder
 
 	concurrency     int
 	inflightQueries int32
@@ -73,14 +76,14 @@ type DHT struct {
 }
 
 // ID returns the ID being used by the DHT.
-func (d *DHT) ID() []byte {
-	return d.id[:]
-}
+func (d *DHT) ID() []byte { return d.id[:] }
 
 // Addr returns the network address of the underlying socket the DHT is using.
-func (d *DHT) Addr() net.Addr {
-	return d.socket.Addr()
-}
+func (d *DHT) Addr() net.Addr { return d.socket.Addr() }
+
+// Encoder return the NodeEncoder used by this node. Primarily intended so that something
+// built on top of it can use the same encoding for IP addresses.
+func (d *DHT) Encoder() ipEncoding.IPEncoder { return d.encoder.IPEncoder }
 
 // Nodes returns all of the nodes currently stored in our local part of the table.
 func (d *DHT) Nodes() []Node {
@@ -94,6 +97,16 @@ func (d *DHT) Nodes() []Node {
 		}
 	}
 	return result
+}
+func (d *DHT) closest(target []byte, count int) []Node {
+	contacts := d.nodes.Closest(kbucket.XORDistance(target), count)
+	nodes := make([]Node, 0, len(contacts))
+	for _, c := range contacts {
+		if n, ok := c.(Node); ok {
+			nodes = append(nodes, n)
+		}
+	}
+	return nodes
 }
 
 func (d *DHT) updateTick() {
@@ -203,13 +216,13 @@ func (d *DHT) forwardRequest(from *udpRequest.PeerRequest, req *Request) {
 		return
 	}
 
-	to := decodePeer(req.ForwardRequest)
+	to := d.encoder.DecodeAddr(req.ForwardRequest)
 	if to == nil {
 		return
 	}
 
 	req.ForwardRequest = nil
-	req.ForwardResponse = encodePeer(from.Addr)
+	req.ForwardResponse = d.encoder.EncodeAddr(from.Addr)
 	if buf, err := proto.Marshal(req); err == nil {
 		d.socket.ForwardRequest(from, to, buf)
 	}
@@ -219,7 +232,7 @@ func (d *DHT) forwardResponse(peer *udpRequest.PeerRequest, req *Request) *udpRe
 		return nil
 	}
 
-	to := decodePeer(req.ForwardResponse)
+	to := d.encoder.DecodeAddr(req.ForwardResponse)
 	if to == nil {
 		return nil
 	}
@@ -324,7 +337,7 @@ func (d *DHT) createResponse(peer net.Addr, req *Request) *Response {
 
 	cmd := req.GetCommand()
 	res := &Response{
-		Nodes:          encodeNodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20)),
+		Nodes:          d.encoder.Encode(d.closest(req.Target, 20)),
 		RoundtripToken: d.makeToken(peer, cmd),
 	}
 
@@ -373,10 +386,10 @@ func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
 	var res *Response
 	switch req.GetCommand() {
 	case "_ping":
-		res = &Response{Value: encodePeer(p.Addr)}
+		res = &Response{Value: d.encoder.EncodeAddr(p.Addr)}
 	case "_find_node":
 		if len(req.Target) == IDSize {
-			res = &Response{Nodes: encodeNodes(d.nodes.Closest(kbucket.XORDistance(req.Target), 20))}
+			res = &Response{Nodes: d.encoder.Encode(d.closest(req.Target, 20))}
 		}
 	default:
 		res = d.createResponse(p.Addr, req)
@@ -423,7 +436,7 @@ func (d *DHT) Ping(ctx context.Context, peer net.Addr) (net.Addr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if publicAddr := decodePeer(res.GetValue()); publicAddr != nil {
+	if publicAddr := d.encoder.DecodeAddr(res.GetValue()); publicAddr != nil {
 		return publicAddr, nil
 	}
 	return nil, errors.New("response contained invalid address")
@@ -435,7 +448,7 @@ func (d *DHT) Holepunch(ctx context.Context, peer, referrer net.Addr) error {
 	req := &Request{
 		Command:        &cmd,
 		Id:             d.queryID,
-		ForwardRequest: encodePeer(peer),
+		ForwardRequest: d.encoder.EncodeAddr(peer),
 	}
 	_, err := d.request(ctx, referrer, req)
 	return err
@@ -521,6 +534,13 @@ func New(cfg *Config) (*DHT, error) {
 		result.rateLimiter <- true
 	}
 	result.bootstrap = c.BootStrap
+
+	if c.IPv6 {
+		result.encoder.IPEncoder = ipEncoding.IPv6Encoder{}
+	} else {
+		result.encoder.IPEncoder = ipEncoding.IPv4Encoder{}
+	}
+	result.encoder.IDSize = IDSize
 
 	if c.ID == nil {
 		c.ID = make([]byte, IDSize)

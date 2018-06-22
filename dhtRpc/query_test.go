@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func localizeAddr(addr net.Addr) net.Addr {
+func localizeAddr(addr net.Addr, ipv6 bool) net.Addr {
 	var port int
 	if u, ok := addr.(*net.UDPAddr); ok {
 		port = u.Port
@@ -25,10 +25,10 @@ func localizeAddr(addr net.Addr) net.Addr {
 		panic("invalid network address " + addr.String())
 	}
 
-	return &net.UDPAddr{
-		IP:   net.IPv4(127, 0, 0, 1),
-		Port: port,
+	if ipv6 {
+		return &net.UDPAddr{IP: net.IPv6loopback, Port: port}
 	}
+	return &net.UDPAddr{IP: net.IP{127, 0, 0, 1}, Port: port}
 }
 
 type dhtPair struct {
@@ -55,14 +55,17 @@ func (p *dhtPair) Close() {
 	}
 }
 
-func createDHTPair() *dhtPair {
+func createDHTPair(ipv6 bool) *dhtPair {
 	result := new(dhtPair)
 	var err error
-	if result.bootstrap, err = New(&Config{Ephemeral: true}); err != nil {
+	if result.bootstrap, err = New(&Config{Ephemeral: true, IPv6: ipv6}); err != nil {
 		panic(err)
 	}
 
-	cfg := &Config{BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr())}}
+	cfg := &Config{
+		BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr(), ipv6)},
+		IPv6:      ipv6,
+	}
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
 	if result.server, err = New(cfg); err != nil {
@@ -103,14 +106,17 @@ func (s *dhtSwarm) Close() {
 	}
 }
 
-func createSwarm(size int) *dhtSwarm {
+func createSwarm(size int, ipv6 bool) *dhtSwarm {
 	result := new(dhtSwarm)
 	var err error
-	if result.bootstrap, err = New(&Config{Ephemeral: true}); err != nil {
+	if result.bootstrap, err = New(&Config{Ephemeral: true, IPv6: ipv6}); err != nil {
 		panic(err)
 	}
 
-	cfg := &Config{BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr())}}
+	cfg := &Config{
+		BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr(), ipv6)},
+		IPv6:      ipv6,
+	}
 
 	// We have a rather long timeout here for the race condition tests. With how many routines
 	// we spawn here it takes a lot of work for the race detector to do whatever it needs to do
@@ -169,9 +175,10 @@ func testQuery(t *testing.T, pair *dhtPair, update bool, query *Query, opts *Que
 		}
 	}
 }
-
-func TestSimpleQuery(t *testing.T) {
-	pair := createDHTPair()
+func TestSimpleQueryIPv4(t *testing.T) { simpleQueryTest(t, false) }
+func TestSimpleQueryIPv6(t *testing.T) { simpleQueryTest(t, true) }
+func simpleQueryTest(t *testing.T, ipv6 bool) {
+	pair := createDHTPair(ipv6)
 	defer pair.Close()
 
 	query := Query{
@@ -202,8 +209,10 @@ func TestSimpleQuery(t *testing.T) {
 	testQuery(t, pair, false, &query, nil, []byte("this is not the world"))
 }
 
-func TestSimpleUpdate(t *testing.T) {
-	pair := createDHTPair()
+func TestSimpleUpdateIPv4(t *testing.T) { simpleUpdateTest(t, false) }
+func TestSimpleUpdateIPv6(t *testing.T) { simpleUpdateTest(t, true) }
+func simpleUpdateTest(t *testing.T, ipv6 bool) {
+	pair := createDHTPair(ipv6)
 	defer pair.Close()
 
 	update := Query{
@@ -224,8 +233,10 @@ func TestSimpleUpdate(t *testing.T) {
 	testQuery(t, pair, true, &update, nil, update.Value)
 }
 
-func TestTargetedQuery(t *testing.T) {
-	pair := createDHTPair()
+func TestTargetedQueryIPv4(t *testing.T) { targetedQueryTest(t, false) }
+func TestTargetedQueryIPv6(t *testing.T) { targetedQueryTest(t, true) }
+func targetedQueryTest(t *testing.T, ipv6 bool) {
+	pair := createDHTPair(ipv6)
 	defer pair.Close()
 
 	serverB, err := New(&Config{BootStrap: pair.server.bootstrap})
@@ -263,14 +274,16 @@ func TestTargetedQuery(t *testing.T) {
 	})
 
 	opts := &QueryOpts{
-		Nodes: []Node{basicNode{id: pair.server.ID(), addr: localizeAddr(pair.server.Addr())}},
+		Nodes: []Node{basicNode{id: pair.server.ID(), addr: localizeAddr(pair.server.Addr(), ipv6)}},
 	}
 
 	testQuery(t, pair, false, &query, opts, []byte("world"))
 }
 
-func TestTargetedUpdate(t *testing.T) {
-	pair := createDHTPair()
+func TestTargetedUpdateIPv4(t *testing.T) { targetedUpdateTest(t, false) }
+func TestTargetedUpdateIPv6(t *testing.T) { targetedUpdateTest(t, true) }
+func targetedUpdateTest(t *testing.T, ipv6 bool) {
+	pair := createDHTPair(ipv6)
 	defer pair.Close()
 
 	serverB, err := New(&Config{BootStrap: pair.server.bootstrap})
@@ -318,15 +331,17 @@ func TestTargetedUpdate(t *testing.T) {
 	})
 
 	opts := &QueryOpts{
-		Nodes: []Node{basicNode{id: pair.server.ID(), addr: localizeAddr(pair.server.Addr())}},
+		Nodes: []Node{basicNode{id: pair.server.ID(), addr: localizeAddr(pair.server.Addr(), ipv6)}},
 	}
 
 	testQuery(t, pair, true, &update, opts, update.Value)
 }
 
-func TestDHTRateLimit(t *testing.T) {
+func TestDHTRateLimitIPv4(t *testing.T) { dHTRateLimitTest(t, false) }
+func TestDHTRateLimitIPv6(t *testing.T) { dHTRateLimitTest(t, true) }
+func dHTRateLimitTest(t *testing.T, ipv6 bool) {
 	// We need a swarm so the query stream has more than one peer to query at a time.
-	swarm := createSwarm(128)
+	swarm := createSwarm(128, ipv6)
 	defer swarm.Close()
 	for _, s := range swarm.servers {
 		s.OnQuery("", func(Node, *Query) ([]byte, error) {
@@ -374,9 +389,11 @@ func TestDHTRateLimit(t *testing.T) {
 	}
 }
 
-func TestQueryRateLimit(t *testing.T) {
+func TestQueryRateLimitIPv4(t *testing.T) { queryRateLimitTest(t, false) }
+func TestQueryRateLimitIPv6(t *testing.T) { queryRateLimitTest(t, true) }
+func queryRateLimitTest(t *testing.T, ipv6 bool) {
 	// We need a swarm so the query stream has more than one peer to query at a time.
-	swarm := createSwarm(128)
+	swarm := createSwarm(128, ipv6)
 	defer swarm.Close()
 	for _, s := range swarm.servers {
 		s.OnQuery("", func(Node, *Query) ([]byte, error) {
@@ -419,8 +436,10 @@ func TestQueryRateLimit(t *testing.T) {
 	}
 }
 
-func TestSwarmQuery(t *testing.T) {
-	swarm := createSwarm(256)
+func TestSwarmQueryIPv4(t *testing.T) { swarmQueryTest(t, false) }
+func TestSwarmQueryIPv6(t *testing.T) { swarmQueryTest(t, true) }
+func swarmQueryTest(t *testing.T, ipv6 bool) {
+	swarm := createSwarm(256, ipv6)
 	defer swarm.Close()
 
 	var closest int32
@@ -468,8 +487,10 @@ func TestSwarmQuery(t *testing.T) {
 	}
 }
 
-func TestNonephemeralBootstrap(t *testing.T) {
-	swarm := createSwarm(32)
+func TestNonephemeralBootstrapIPv4(t *testing.T) { nonephemeralBootstrapTest(t, false) }
+func TestNonephemeralBootstrapIPv6(t *testing.T) { nonephemeralBootstrapTest(t, true) }
+func nonephemeralBootstrapTest(t *testing.T, ipv6 bool) {
+	swarm := createSwarm(32, ipv6)
 	defer swarm.Close()
 
 	if nodes := swarm.client.Nodes(); len(nodes) > 0 {
@@ -477,7 +498,7 @@ func TestNonephemeralBootstrap(t *testing.T) {
 	}
 	swarm.client.bootstrap = make([]net.Addr, 20)
 	for i := range swarm.client.bootstrap {
-		swarm.client.bootstrap[i] = localizeAddr(swarm.servers[i].Addr())
+		swarm.client.bootstrap[i] = localizeAddr(swarm.servers[i].Addr(), ipv6)
 	}
 
 	for i, node := range swarm.servers {

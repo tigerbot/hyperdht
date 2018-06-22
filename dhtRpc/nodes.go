@@ -5,14 +5,17 @@ import (
 	"net"
 	"sync"
 
+	"gitlab.daplie.com/core-sdk/hyperdht/ipEncoding"
 	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
 )
 
 // A Node represents another peer
-type Node interface {
-	kbucket.Contact
-	Addr() net.Addr
-}
+type Node = ipEncoding.Node
+
+var (
+	_, _, _ Node            = new(basicNode), new(storedNode), new(queryNode)
+	_       kbucket.Contact = new(storedNode)
+)
 
 type basicNode struct {
 	id   []byte

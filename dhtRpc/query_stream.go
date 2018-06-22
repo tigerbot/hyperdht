@@ -198,7 +198,7 @@ func (s *QueryStream) send(node *queryNode, isUpdate bool) {
 
 	s.addClosest(node.addr, res)
 	if s.moveCloser {
-		for _, n := range decodeNodes(res.GetNodes()) {
+		for _, n := range s.dht.encoder.Decode(res.GetNodes()) {
 			s.addPending(n, node.addr)
 		}
 	}
@@ -312,7 +312,7 @@ func newQueryStream(ctx context.Context, dht *DHT, query *Query, opts *QueryOpts
 			result.addPending(n, nil)
 		}
 	} else {
-		bootstrap := dht.nodes.Closest(kbucket.XORDistance(query.Target), k)
+		bootstrap := dht.closest(query.Target, k)
 		for _, c := range bootstrap {
 			if n, ok := c.(Node); ok {
 				result.addPending(n, nil)

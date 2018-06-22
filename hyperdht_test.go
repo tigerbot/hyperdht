@@ -11,7 +11,7 @@ import (
 	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
 )
 
-func localizeAddr(addr net.Addr) net.Addr {
+func localizeAddr(addr net.Addr, ipv6 bool) net.Addr {
 	var port int
 	if u, ok := addr.(*net.UDPAddr); ok {
 		port = u.Port
@@ -23,10 +23,10 @@ func localizeAddr(addr net.Addr) net.Addr {
 		panic("invalid network address " + addr.String())
 	}
 
-	return &net.UDPAddr{
-		IP:   net.IPv4(127, 0, 0, 1),
-		Port: port,
+	if ipv6 {
+		return &net.UDPAddr{IP: net.IPv6loopback, Port: port}
 	}
+	return &net.UDPAddr{IP: net.IP{127, 0, 0, 1}, Port: port}
 }
 
 type dhtPair struct {
@@ -53,13 +53,16 @@ func (s *dhtPair) Close() {
 	}
 }
 
-func createPair() *dhtPair {
+func createPair(ipv6 bool) *dhtPair {
 	result := new(dhtPair)
 	var err error
-	if result.bootstrap, err = New(nil); err != nil {
+	if result.bootstrap, err = New(&dhtRpc.Config{IPv6: ipv6}); err != nil {
 		panic(err)
 	}
-	cfg := &dhtRpc.Config{BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr())}}
+	cfg := &dhtRpc.Config{
+		BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr(), ipv6)},
+		IPv6:      ipv6,
+	}
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
 
@@ -76,16 +79,17 @@ func createPair() *dhtPair {
 
 	return result
 }
-
-func TestHyperDHTBasic(t *testing.T) {
-	pair := createPair()
+func TestHyperDHTBasicIPv4(t *testing.T) { hyperDHTBasicTest(t, false) }
+func TestHyperDHTBasicIPv6(t *testing.T) { hyperDHTBasicTest(t, true) }
+func hyperDHTBasicTest(t *testing.T, ipv6 bool) {
+	pair := createPair(ipv6)
 	defer pair.Close()
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
 
 	sum := sha256.Sum256([]byte("hello"))
 	key := sum[:]
-	serverAddr := localizeAddr(pair.server.Addr())
+	serverAddr := localizeAddr(pair.server.Addr(), ipv6)
 	runQuery := func(name string, dht *HyperDHT, expected bool) {
 		responses, err := CollectStream(dht.Lookup(ctx, key, nil))
 		if err != nil {
@@ -131,16 +135,17 @@ func TestHyperDHTBasic(t *testing.T) {
 	runQuery("client post-unannounce", pair.client, false)
 	runQuery("bootstrap post-unannounce", pair.bootstrap, false)
 }
-
-func TestHyperDHTLocal(t *testing.T) {
-	pair := createPair()
+func hyperDHTLocalIPv4Test(t *testing.T) { hyperDHTLocalTest(t, false) }
+func TestHyperDHTLocalIPv6(t *testing.T) { hyperDHTLocalTest(t, true) }
+func hyperDHTLocalTest(t *testing.T, ipv6 bool) {
+	pair := createPair(ipv6)
 	defer pair.Close()
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
 
 	sum := sha256.Sum256([]byte("hello"))
 	key := sum[:]
-	serverAddr := localizeAddr(pair.server.Addr())
+	serverAddr := localizeAddr(pair.server.Addr(), ipv6)
 	localAddr := &net.UDPAddr{IP: net.IPv4(192, 168, 1, 123), Port: 1234}
 	if responses, err := CollectStream(pair.server.Announce(ctx, key, &QueryOpts{LocalAddr: localAddr})); err != nil {
 		t.Fatal("error announcing:", err)
@@ -178,7 +183,7 @@ func TestHyperDHTLocal(t *testing.T) {
 }
 
 func TestPortOverride(t *testing.T) {
-	pair := createPair()
+	pair := createPair(false)
 	defer pair.Close()
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()

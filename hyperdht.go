@@ -73,7 +73,13 @@ func (d *HyperDHT) createStream(ctx context.Context, key []byte, req *PeerReques
 }
 func (d *HyperDHT) createMappedStream(ctx context.Context, key []byte, req *PeerRequest) *QueryStream {
 	stream := d.createStream(ctx, key, req)
-	result := &QueryStream{stream, req.GetLocalAddress(), ctx, make(chan QueryResponse)}
+	result := &QueryStream{
+		stream,
+		req.GetLocalAddress(),
+		d.dht.Encoder(),
+		ctx,
+		make(chan QueryResponse),
+	}
 
 	localRes := d.processPeers(req, d.Addr(), key, false)
 	go result.runMap(d.Addr(), localRes)
@@ -129,7 +135,7 @@ func (d *HyperDHT) processPeers(req *PeerRequest, from net.Addr, target []byte, 
 		from = overridePort(from, int(port))
 	}
 	key, id := hex.EncodeToString(target), from.String()
-	peer := encodePeer(from)
+	peer := d.dht.Encoder().EncodeAddr(from)
 
 	if isUpdate && req.GetType() == unannounceType {
 		d.store.Del(key, id)
@@ -137,7 +143,7 @@ func (d *HyperDHT) processPeers(req *PeerRequest, from net.Addr, target []byte, 
 	}
 	if isUpdate && req.GetType() == announceType {
 		info := &peerInfo{encoded: peer}
-		if req.LocalAddress != nil && decodePeer(req.LocalAddress) != nil {
+		if (ipEncoding.IPv4Encoder{}).DecodeAddr(req.LocalAddress) != nil {
 			info.localFilter = req.LocalAddress[:2]
 			info.localPeer = req.LocalAddress[2:]
 		}
@@ -191,38 +197,6 @@ func NewWithDHT(dht *dhtRpc.DHT) *HyperDHT {
 	return result
 }
 
-var peerEnc = ipEncoding.NodeEncoder{IPEncoder: ipEncoding.IPv4Encoder{}}
-
-func encodePeer(addr net.Addr) []byte { return peerEnc.EncodeAddr(addr) }
-func decodePeer(buf []byte) net.Addr  { return peerEnc.DecodeAddr(buf) }
-
-func decodeAllPeers(buf []byte) []net.Addr {
-	list := peerEnc.Decode(buf)
-	if len(list) == 0 {
-		return nil
-	}
-
-	result := make([]net.Addr, len(list))
-	for i := range list {
-		result[i] = list[i].Addr()
-	}
-	return result
-}
-func decodeLocalPeers(localAddr, buf []byte) []net.Addr {
-	if len(localAddr) != 6 || len(buf) == 0 || len(buf)%4 != 0 {
-		return nil
-	}
-
-	cp := make([]byte, 6)
-	copy(cp, localAddr[:2])
-	list := make([]net.Addr, len(buf)/4)
-	for i := range list {
-		cp = append(cp[:2], buf[4*i:4*(i+1)]...)
-		list[i] = decodePeer(cp)
-	}
-	return list
-}
-
 func createLocalFilter(localAddr []byte) func(*peerInfo) bool {
 	if len(localAddr) != 6 {
 		return func(*peerInfo) bool { return false }
@@ -247,7 +221,7 @@ func createRequest(kind uint32, opts *QueryOpts) *PeerRequest {
 		Type: &kind,
 	}
 	if opts != nil {
-		req.LocalAddress = encodePeer(opts.LocalAddr)
+		req.LocalAddress = (ipEncoding.IPv4Encoder{}).EncodeAddr(opts.LocalAddr)
 		if port := uint32(opts.Port); port != 0 {
 			req.Port = &port
 		}
