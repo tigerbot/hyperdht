@@ -31,55 +31,6 @@ func localizeAddr(addr net.Addr, ipv6 bool) net.Addr {
 	return &net.UDPAddr{IP: net.IP{127, 0, 0, 1}, Port: port}
 }
 
-type dhtPair struct {
-	bootstrap *DHT
-	server    *DHT
-	client    *DHT
-}
-
-func (p *dhtPair) Close() {
-	var errs []error
-
-	if err := p.bootstrap.Close(); err != nil {
-		errs = append(errs, err)
-	}
-	if err := p.server.Close(); err != nil {
-		errs = append(errs, err)
-	}
-	if err := p.client.Close(); err != nil {
-		errs = append(errs, err)
-	}
-
-	if errs != nil {
-		panic(errs)
-	}
-}
-
-func createDHTPair(t *testing.T, ipv6 bool) *dhtPair {
-	result := new(dhtPair)
-	var err error
-	if result.bootstrap, err = New(&Config{Ephemeral: true, IPv6: ipv6}); err != nil {
-		t.Fatal("failed to create bootstrap node:", err)
-	}
-
-	cfg := &Config{
-		BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr(), ipv6)},
-		IPv6:      ipv6,
-	}
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
-	defer done()
-	if result.server, err = New(cfg); err != nil {
-		t.Fatal("failed to create server node:", err)
-	} else if err = result.server.Bootstrap(ctx); err != nil {
-		t.Fatal("failed to bootstrap server node:", err)
-	}
-	if result.client, err = New(cfg); err != nil {
-		t.Fatal("failed to create client node:", err)
-	}
-
-	return result
-}
-
 type dhtSwarm struct {
 	bootstrap *DHT
 	servers   []*DHT
@@ -163,7 +114,7 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 	return result
 }
 
-func testQuery(t *testing.T, pair *dhtPair, update bool, query *Query, opts *QueryOpts, respValue []byte) {
+func testQuery(t *testing.T, pair *dhtSwarm, update bool, query *Query, opts *QueryOpts, respValue []byte) {
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
 
@@ -183,21 +134,21 @@ func testQuery(t *testing.T, pair *dhtPair, update bool, query *Query, opts *Que
 		if !bytes.Equal(resp.Value, respValue) {
 			t.Errorf("query response had %q as value expected %q", resp.Value, respValue)
 		}
-		if !bytes.Equal(resp.Node.ID(), pair.server.ID()) {
-			t.Errorf("query response ID is %x, expected %x", resp.Node.ID(), pair.server.ID())
+		if !bytes.Equal(resp.Node.ID(), pair.servers[0].ID()) {
+			t.Errorf("query response ID is %x, expected %x", resp.Node.ID(), pair.servers[0].ID())
 		}
 	}
 }
 func TestSimpleQuery(t *testing.T) { simpleQueryTest(t, false) }
 func simpleQueryTest(t *testing.T, ipv6 bool) {
-	pair := createDHTPair(t, ipv6)
+	pair := createSwarm(t, 1, ipv6)
 	defer pair.Close()
 
 	query := Query{
 		Command: "hello",
-		Target:  pair.server.ID(),
+		Target:  pair.servers[0].ID(),
 	}
-	pair.server.OnQuery("hello", func(n Node, q *Query) ([]byte, error) {
+	pair.servers[0].OnQuery("hello", func(n Node, q *Query) ([]byte, error) {
 		if !bytes.Equal(n.ID(), pair.client.ID()) {
 			t.Errorf("query handler received wrong ID %x, expected %x", n.ID(), pair.client.ID())
 		}
@@ -206,7 +157,7 @@ func simpleQueryTest(t *testing.T, ipv6 bool) {
 		}
 		return []byte("world"), nil
 	})
-	pair.server.OnQuery("", func(n Node, q *Query) ([]byte, error) {
+	pair.servers[0].OnQuery("", func(n Node, q *Query) ([]byte, error) {
 		if !bytes.Equal(n.ID(), pair.client.ID()) {
 			t.Errorf("query handler received wrong ID %x, expected %x", n.ID(), pair.client.ID())
 		}
@@ -217,21 +168,21 @@ func simpleQueryTest(t *testing.T, ipv6 bool) {
 	})
 
 	testQuery(t, pair, false, &query, nil, []byte("world"))
-	pair.server.OnQuery("hello", nil)
+	pair.servers[0].OnQuery("hello", nil)
 	testQuery(t, pair, false, &query, nil, []byte("this is not the world"))
 }
 
 func TestSimpleUpdate(t *testing.T) { simpleUpdateTest(t, false) }
 func simpleUpdateTest(t *testing.T, ipv6 bool) {
-	pair := createDHTPair(t, ipv6)
+	pair := createSwarm(t, 1, ipv6)
 	defer pair.Close()
 
 	update := Query{
 		Command: "echo",
-		Target:  pair.server.ID(),
+		Target:  pair.servers[0].ID(),
 		Value:   []byte("Hello World!"),
 	}
-	pair.server.OnUpdate("echo", func(n Node, q *Query) ([]byte, error) {
+	pair.servers[0].OnUpdate("echo", func(n Node, q *Query) ([]byte, error) {
 		if !bytes.Equal(n.ID(), pair.client.ID()) {
 			t.Errorf("OnUpdate received wrong ID %x, expected %x", n.ID(), pair.client.ID())
 		}
@@ -246,10 +197,10 @@ func simpleUpdateTest(t *testing.T, ipv6 bool) {
 
 func TestTargetedQuery(t *testing.T) { targetedQueryTest(t, false) }
 func targetedQueryTest(t *testing.T, ipv6 bool) {
-	pair := createDHTPair(t, ipv6)
+	pair := createSwarm(t, 1, ipv6)
 	defer pair.Close()
 
-	serverB, err := New(&Config{BootStrap: pair.server.bootstrap})
+	serverB, err := New(&Config{BootStrap: pair.servers[0].bootstrap, Socket: pair.network.NewNode(true)})
 	if err != nil {
 		t.Fatal("creating second server errored", err)
 	}
@@ -273,7 +224,7 @@ func targetedQueryTest(t *testing.T, ipv6 bool) {
 		Command: "hello",
 		Target:  serverB.ID(),
 	}
-	pair.server.OnQuery("hello", func(n Node, q *Query) ([]byte, error) {
+	pair.servers[0].OnQuery("hello", func(n Node, q *Query) ([]byte, error) {
 		if !bytes.Equal(n.ID(), pair.client.ID()) {
 			t.Errorf("query handler received wrong ID %x, expected %x", n.ID(), pair.client.ID())
 		}
@@ -284,7 +235,7 @@ func targetedQueryTest(t *testing.T, ipv6 bool) {
 	})
 
 	opts := &QueryOpts{
-		Nodes: []Node{basicNode{id: pair.server.ID(), addr: localizeAddr(pair.server.Addr(), ipv6)}},
+		Nodes: []Node{basicNode{id: pair.servers[0].ID(), addr: localizeAddr(pair.servers[0].Addr(), ipv6)}},
 	}
 
 	testQuery(t, pair, false, &query, opts, []byte("world"))
@@ -292,10 +243,10 @@ func targetedQueryTest(t *testing.T, ipv6 bool) {
 
 func TestTargetedUpdate(t *testing.T) { targetedUpdateTest(t, false) }
 func targetedUpdateTest(t *testing.T, ipv6 bool) {
-	pair := createDHTPair(t, ipv6)
+	pair := createSwarm(t, 1, ipv6)
 	defer pair.Close()
 
-	serverB, err := New(&Config{BootStrap: pair.server.bootstrap})
+	serverB, err := New(&Config{BootStrap: pair.servers[0].bootstrap, Socket: pair.network.NewNode(true)})
 	if err != nil {
 		t.Fatal("creating second server errored", err)
 	}
@@ -329,7 +280,7 @@ func targetedUpdateTest(t *testing.T, ipv6 bool) {
 		Target:  serverB.ID(),
 		Value:   []byte("Hello World!"),
 	}
-	pair.server.OnUpdate("echo", func(n Node, q *Query) ([]byte, error) {
+	pair.servers[0].OnUpdate("echo", func(n Node, q *Query) ([]byte, error) {
 		if !bytes.Equal(n.ID(), pair.client.ID()) {
 			t.Errorf("OnUpdate received wrong ID %x, expected %x", n.ID(), pair.client.ID())
 		}
@@ -340,7 +291,7 @@ func targetedUpdateTest(t *testing.T, ipv6 bool) {
 	})
 
 	opts := &QueryOpts{
-		Nodes: []Node{basicNode{id: pair.server.ID(), addr: localizeAddr(pair.server.Addr(), ipv6)}},
+		Nodes: []Node{basicNode{id: pair.servers[0].ID(), addr: localizeAddr(pair.servers[0].Addr(), ipv6)}},
 	}
 
 	testQuery(t, pair, true, &update, opts, update.Value)
