@@ -1,9 +1,9 @@
 image: golang:1.9
 
 before_script:
-  - mkdir -p /go/src/gitlab.com/
-  - cp -r /builds/core-sdk /go/src/gitlab.com/core-sdk
-  - cd /go/src/gitlab.com/core-sdk/hyperdht
+  - mkdir -p /go/src/gitlab.daplie.com/
+  - cp -r /builds/core-sdk /go/src/gitlab.daplie.com/core-sdk
+  - cd /go/src/gitlab.daplie.com/core-sdk/hyperdht
   - go env # Just because the output can be helpful
   - go get -d -t ./...
 
