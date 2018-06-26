@@ -4,13 +4,13 @@ before_script:
   - mkdir -p /go/src/gitlab.com/
   - cp -r /builds/core-sdk /go/src/gitlab.com/core-sdk
   - cd /go/src/gitlab.com/core-sdk/hyperdht
-  - go env # Just because the output can get helpfull
+  - go env # Just because the output can be helpful
   - go get -d -t ./...
 
 coverage:
   script: "bash -euc '
     mkdir -p cover;
-    PKG_LIST=$(go list ./... | grep -v \"/cmd/\");
+    PKG_LIST=$(go list ./... | grep -v -e \"/cmd/\" -e \"internal/protoSchemas\");
     for pkg in ${PKG_LIST}; do
       go test $pkg -covermode=count -coverprofile cover/${pkg##*/}.out -timeout 2m;
     done;

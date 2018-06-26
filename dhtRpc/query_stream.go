@@ -155,7 +155,7 @@ func (s *QueryStream) runStream() {
 }
 
 func (s *QueryStream) send(node *queryNode, isUpdate bool) {
-	req := &Request{
+	req := &request{
 		Command: &s.query.Command,
 		Id:      s.dht.queryID,
 		Target:  s.query.Target,
@@ -251,7 +251,7 @@ func (s *QueryStream) addPending(node Node, ref net.Addr) {
 
 	s.pending.insert(qNode)
 }
-func (s *QueryStream) addClosest(peer net.Addr, res *Response) {
+func (s *QueryStream) addClosest(peer net.Addr, res *response) {
 	id := res.GetId()
 	if id == nil || res.GetRoundtripToken() == nil || bytes.Equal(id, s.dht.id[:]) {
 		return

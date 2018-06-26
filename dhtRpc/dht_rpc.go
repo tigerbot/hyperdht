@@ -15,9 +15,15 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 
+	"gitlab.daplie.com/core-sdk/hyperdht/internal/protoSchemas"
 	"gitlab.daplie.com/core-sdk/hyperdht/ipEncoding"
 	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
 	"gitlab.daplie.com/core-sdk/hyperdht/udpRequest"
+)
+
+type (
+	request  = protoSchemas.RpcRequest
+	response = protoSchemas.RpcResponse
 )
 
 const (
@@ -212,7 +218,7 @@ func (d *DHT) addNode(peer net.Addr, id []byte) {
 	d.nodes.Add(node)
 }
 
-func (d *DHT) forwardRequest(from *udpRequest.PeerRequest, req *Request) {
+func (d *DHT) forwardRequest(from *udpRequest.PeerRequest, req *request) {
 	if req.GetCommand() != pingCmd {
 		return
 	}
@@ -228,7 +234,7 @@ func (d *DHT) forwardRequest(from *udpRequest.PeerRequest, req *Request) {
 		d.socket.ForwardRequest(from, to, buf)
 	}
 }
-func (d *DHT) forwardResponse(peer *udpRequest.PeerRequest, req *Request) *udpRequest.PeerRequest {
+func (d *DHT) forwardResponse(peer *udpRequest.PeerRequest, req *request) *udpRequest.PeerRequest {
 	if req.GetCommand() != pingCmd {
 		return nil
 	}
@@ -326,7 +332,7 @@ func (d *DHT) getHandler(cmd string, isUpdate bool) QueryHandler {
 	}
 	return d.handlers[method]
 }
-func (d *DHT) createResponse(peer net.Addr, req *Request) *Response {
+func (d *DHT) createResponse(peer net.Addr, req *request) *response {
 	// While I think it would be potentially useful to allow targets of different ID size, there
 	// is potential for problems in the ambiguity of what nodes are closest, particularly if the
 	// target size is too small. For example if there were hundreds of nodes with the same distance
@@ -337,7 +343,7 @@ func (d *DHT) createResponse(peer net.Addr, req *Request) *Response {
 	}
 
 	cmd := req.GetCommand()
-	res := &Response{
+	res := &response{
 		Nodes:          d.encoder.Encode(d.closest(req.Target, 20)),
 		RoundtripToken: d.makeToken(peer, cmd),
 	}
@@ -367,7 +373,7 @@ func (d *DHT) createResponse(peer net.Addr, req *Request) *Response {
 // HandleUDPRequest implements the udpRequest.Handler interface. It is not recommended to
 // use this function directly even though it is exported.
 func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
-	req := new(Request)
+	req := new(request)
 	if err := proto.Unmarshal(reqBuf, req); err != nil {
 		return
 	}
@@ -384,13 +390,13 @@ func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
 		}
 	}
 
-	var res *Response
+	var res *response
 	switch req.GetCommand() {
 	case "_ping":
-		res = &Response{Value: d.encoder.EncodeAddr(p.Addr)}
+		res = &response{Value: d.encoder.EncodeAddr(p.Addr)}
 	case "_find_node":
 		if len(req.Target) == IDSize {
-			res = &Response{Nodes: d.encoder.Encode(d.closest(req.Target, 20))}
+			res = &response{Nodes: d.encoder.Encode(d.closest(req.Target, 20))}
 		}
 	default:
 		res = d.createResponse(p.Addr, req)
@@ -404,7 +410,7 @@ func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
 	}
 }
 
-func (d *DHT) request(ctx context.Context, peer net.Addr, req *Request) (*Response, error) {
+func (d *DHT) request(ctx context.Context, peer net.Addr, req *request) (*response, error) {
 	reqBuf, err := proto.Marshal(req)
 	if err != nil {
 		return nil, errors.WithMessage(err, "encoding request")
@@ -422,7 +428,7 @@ func (d *DHT) request(ctx context.Context, peer net.Addr, req *Request) (*Respon
 		return nil, err
 	}
 
-	res := new(Response)
+	res := new(response)
 	if err := proto.Unmarshal(resBuf, res); err != nil {
 		return nil, errors.WithMessage(err, "decoding response")
 	}
@@ -433,7 +439,7 @@ func (d *DHT) request(ctx context.Context, peer net.Addr, req *Request) (*Respon
 // Ping sends a special query that always responds with our address as the peer saw it.
 func (d *DHT) Ping(ctx context.Context, peer net.Addr) (net.Addr, error) {
 	cmd := pingCmd
-	res, err := d.request(ctx, peer, &Request{Command: &cmd, Id: d.queryID})
+	res, err := d.request(ctx, peer, &request{Command: &cmd, Id: d.queryID})
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +452,7 @@ func (d *DHT) Ping(ctx context.Context, peer net.Addr) (net.Addr, error) {
 // Holepunch uses the `referrer` node as a STUN server to UDP hole punch to the `peer`.
 func (d *DHT) Holepunch(ctx context.Context, peer, referrer net.Addr) error {
 	cmd := pingCmd
-	req := &Request{
+	req := &request{
 		Command:        &cmd,
 		Id:             d.queryID,
 		ForwardRequest: d.encoder.EncodeAddr(peer),

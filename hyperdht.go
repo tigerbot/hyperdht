@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 
 	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
+	"gitlab.daplie.com/core-sdk/hyperdht/internal/protoSchemas"
 	"gitlab.daplie.com/core-sdk/hyperdht/ipEncoding"
 )
 
@@ -21,6 +22,11 @@ const (
 	unannounceType
 
 	queryCmd = "peers"
+)
+
+type (
+	request  = protoSchemas.PeerRequest
+	response = protoSchemas.PeerResponse
 )
 
 // HyperDHT wraps a DHT RPC instance and handles the particular calls needed for peer
@@ -48,7 +54,7 @@ func (d *HyperDHT) OnUpdate(cmd string, handler dhtRpc.QueryHandler) {
 	}
 }
 
-func (d *HyperDHT) createStream(ctx context.Context, key []byte, req *PeerRequest) *subStream {
+func (d *HyperDHT) createStream(ctx context.Context, key []byte, req *request) *subStream {
 	reqBuf, err := proto.Marshal(req)
 	if err != nil {
 		// Pretty sure this will never happen, so not worth making people check a return value.
@@ -71,7 +77,7 @@ func (d *HyperDHT) createStream(ctx context.Context, key []byte, req *PeerReques
 	// Pretty sure this will never happen, so not worth making people check a return value.
 	panic(errors.Errorf("invalid stream type %d", req.GetType()))
 }
-func (d *HyperDHT) createMappedStream(ctx context.Context, key []byte, req *PeerRequest) *QueryStream {
+func (d *HyperDHT) createMappedStream(ctx context.Context, key []byte, req *request) *QueryStream {
 	stream := d.createStream(ctx, key, req)
 	result := &QueryStream{
 		stream,
@@ -116,7 +122,7 @@ func (d *HyperDHT) onUpdate(n dhtRpc.Node, q *dhtRpc.Query) ([]byte, error) {
 	return d.onRequest(n, q, true)
 }
 func (d *HyperDHT) onRequest(n dhtRpc.Node, q *dhtRpc.Query, isUpdate bool) ([]byte, error) {
-	var req PeerRequest
+	var req request
 	if err := proto.Unmarshal(q.Value, &req); err == nil {
 		if res := d.processPeers(&req, n.Addr(), q.Target, isUpdate); res != nil {
 			if resBuf, err := proto.Marshal(res); err == nil {
@@ -130,7 +136,7 @@ func (d *HyperDHT) onRequest(n dhtRpc.Node, q *dhtRpc.Query, isUpdate bool) ([]b
 	return nil, nil
 }
 
-func (d *HyperDHT) processPeers(req *PeerRequest, from net.Addr, target []byte, isUpdate bool) *PeerResponse {
+func (d *HyperDHT) processPeers(req *request, from net.Addr, target []byte, isUpdate bool) *response {
 	if port := req.GetPort(); port != 0 {
 		from = overridePort(from, int(port))
 	}
@@ -172,7 +178,7 @@ func (d *HyperDHT) processPeers(req *PeerRequest, from net.Addr, target []byte, 
 	if peersBuf == nil {
 		return nil
 	}
-	return &PeerResponse{
+	return &response{
 		Peers:      peersBuf,
 		LocalPeers: localBuf,
 	}
@@ -216,8 +222,8 @@ func createLocalFilter(localAddr []byte) func(*peerInfo) bool {
 	}
 }
 
-func createRequest(kind uint32, opts *QueryOpts) *PeerRequest {
-	req := &PeerRequest{
+func createRequest(kind uint32, opts *QueryOpts) *request {
+	req := &request{
 		Type: &kind,
 	}
 	if opts != nil {

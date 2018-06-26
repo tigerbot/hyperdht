@@ -55,10 +55,10 @@ type QueryStream struct {
 // continue with the query.
 func (s *QueryStream) ResponseChan() <-chan QueryResponse { return s.respChan }
 
-func (s *QueryStream) runMap(selfAddr net.Addr, selfRes *PeerResponse) {
+func (s *QueryStream) runMap(selfAddr net.Addr, selfRes *response) {
 	defer close(s.respChan)
 
-	handleResponse := func(from net.Addr, res *PeerResponse) {
+	handleResponse := func(from net.Addr, res *response) {
 		peers := s.decodeAllPeers(res.Peers)
 		if peers == nil {
 			return
@@ -80,7 +80,7 @@ func (s *QueryStream) runMap(selfAddr net.Addr, selfRes *PeerResponse) {
 		handleResponse(selfAddr, selfRes)
 	}
 	for rawRes := range s.subStream.ResponseChan() {
-		var res PeerResponse
+		var res response
 		if err := proto.Unmarshal(rawRes.Value, &res); err == nil {
 			handleResponse(rawRes.Node.Addr(), &res)
 		}
