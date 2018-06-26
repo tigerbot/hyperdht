@@ -8,15 +8,6 @@ import (
 	"gitlab.daplie.com/core-sdk/hyperdht/fakeNetwork"
 )
 
-func createDHTNode(t *testing.T, network *fakeNetwork.FakeNetwork, ipv6, public bool) *DHT {
-	sock := network.NewNode(fakeNetwork.RandomAddress(ipv6), public)
-	node, err := New(&Config{Socket: sock, IPv6: ipv6, timeout: 5 * time.Millisecond})
-	if err != nil {
-		t.Fatal("failed to create new DHT node:", err)
-	}
-	return node
-}
-
 func TestPing(t *testing.T) { dualIPTest(t, pingTest) }
 func pingTest(t *testing.T, ipv6 bool) {
 	network := fakeNetwork.New()
