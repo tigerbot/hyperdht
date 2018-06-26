@@ -451,6 +451,9 @@ func (d *DHT) Holepunch(ctx context.Context, peer, referrer net.Addr) error {
 		Id:             d.queryID,
 		ForwardRequest: d.encoder.EncodeAddr(peer),
 	}
+	if req.ForwardRequest == nil {
+		return errors.Errorf("invalid peer address %s", peer)
+	}
 	_, err := d.request(ctx, referrer, req)
 	return err
 }
