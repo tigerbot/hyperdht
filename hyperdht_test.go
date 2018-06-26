@@ -4,32 +4,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"net"
-	"strconv"
 	"testing"
 	"time"
+
+	"gitlab.daplie.com/core-sdk/hyperdht/fakeNetwork"
 
 	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
 )
 
-func localizeAddr(addr net.Addr, ipv6 bool) net.Addr {
-	var port int
-	if u, ok := addr.(*net.UDPAddr); ok {
-		port = u.Port
-	} else if t, ok := addr.(*net.TCPAddr); ok {
-		port = t.Port
-	} else if _, portStr, err := net.SplitHostPort(addr.String()); err != nil {
-		panic("invalid network address " + addr.String())
-	} else if port, err = strconv.Atoi(portStr); err != nil || port < 0 || port > (1<<16) {
-		panic("invalid network address " + addr.String())
-	}
-
-	if ipv6 {
-		return &net.UDPAddr{IP: net.IPv6loopback, Port: port}
-	}
-	return &net.UDPAddr{IP: net.IP{127, 0, 0, 1}, Port: port}
-}
-
 type dhtPair struct {
+	network   *fakeNetwork.FakeNetwork
 	bootstrap *HyperDHT
 	server    *HyperDHT
 	client    *HyperDHT
@@ -47,6 +31,9 @@ func (s *dhtPair) Close() {
 	if err := s.client.Close(); err != nil {
 		errs = append(errs, err)
 	}
+	if err := s.network.Close(); err != nil {
+		errs = append(errs, err)
+	}
 
 	if errs != nil {
 		panic(errs)
@@ -54,32 +41,49 @@ func (s *dhtPair) Close() {
 }
 
 func createPair(t *testing.T, ipv6 bool) *dhtPair {
-	result := new(dhtPair)
+	result := &dhtPair{network: fakeNetwork.New()}
+	modConfig := func(cfg *dhtRpc.Config) *dhtRpc.Config {
+		cp := *cfg
+		cp.Socket = result.network.NewNode(fakeNetwork.RandomAddress(ipv6), true)
+		return &cp
+	}
+
 	var err error
-	if result.bootstrap, err = New(&dhtRpc.Config{IPv6: ipv6}); err != nil {
+	if result.bootstrap, err = New(modConfig(&dhtRpc.Config{IPv6: ipv6})); err != nil {
 		t.Fatal("failed to create bootstrap node:", err)
 	}
 	cfg := &dhtRpc.Config{
-		BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr(), ipv6)},
+		BootStrap: []net.Addr{result.bootstrap.Addr()},
 		IPv6:      ipv6,
 	}
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
 
-	if result.server, err = New(cfg); err != nil {
+	if result.server, err = New(modConfig(cfg)); err != nil {
 		t.Fatal("failed to create server node:", err)
 	} else if err = result.server.Bootstrap(ctx); err != nil {
 		t.Fatal("failed to bootstrap server node:", err)
 	}
 
 	cfg.Ephemeral = true
-	if result.client, err = New(cfg); err != nil {
+	if result.client, err = New(modConfig(cfg)); err != nil {
 		t.Fatal("failed to create client node:", err)
 	}
 
 	return result
 }
-func TestHyperDHTBasic(t *testing.T) { hyperDHTBasicTest(t, false) }
+
+func dualIPTest(t *testing.T, f func(*testing.T, bool)) {
+	wrap := func(ipv6 bool) func(*testing.T) {
+		return func(t *testing.T) {
+			f(t, ipv6)
+		}
+	}
+	t.Run("ipv4", wrap(false))
+	t.Run("ipv6", wrap(true))
+}
+
+func TestHyperDHTBasic(t *testing.T) { dualIPTest(t, hyperDHTBasicTest) }
 func hyperDHTBasicTest(t *testing.T, ipv6 bool) {
 	pair := createPair(t, ipv6)
 	defer pair.Close()
@@ -88,7 +92,6 @@ func hyperDHTBasicTest(t *testing.T, ipv6 bool) {
 
 	sum := sha256.Sum256([]byte("hello"))
 	key := sum[:]
-	serverAddr := localizeAddr(pair.server.Addr(), ipv6)
 	runQuery := func(name string, dht *HyperDHT, expected bool) {
 		responses, err := CollectStream(dht.Lookup(ctx, key, nil))
 		if err != nil {
@@ -107,8 +110,8 @@ func hyperDHTBasicTest(t *testing.T, ipv6 bool) {
 			resp := responses[0]
 			if len(resp.Peers) != 1 {
 				t.Errorf("lookup from %s resulted in %d peers, expected 1\n\t%#v", name, len(resp.Peers), resp.Peers)
-			} else if resp.Peers[0].String() != serverAddr.String() {
-				t.Errorf("lookup from %s returned peer %s, expected %s", name, resp.Peers[0], serverAddr)
+			} else if resp.Peers[0].String() != pair.server.Addr().String() {
+				t.Errorf("lookup from %s returned peer %s, expected %s", name, resp.Peers[0], pair.server.Addr())
 			}
 		}
 	}
@@ -135,7 +138,7 @@ func hyperDHTBasicTest(t *testing.T, ipv6 bool) {
 	runQuery("bootstrap post-unannounce", pair.bootstrap, false)
 }
 
-func TestHyperDHTLocal(t *testing.T) { hyperDHTLocalTest(t, false) }
+func TestHyperDHTLocal(t *testing.T) { dualIPTest(t, hyperDHTLocalTest) }
 func hyperDHTLocalTest(t *testing.T, ipv6 bool) {
 	pair := createPair(t, ipv6)
 	defer pair.Close()
@@ -144,7 +147,6 @@ func hyperDHTLocalTest(t *testing.T, ipv6 bool) {
 
 	sum := sha256.Sum256([]byte("hello"))
 	key := sum[:]
-	serverAddr := localizeAddr(pair.server.Addr(), ipv6)
 	localAddr := &net.UDPAddr{IP: net.IPv4(192, 168, 1, 123), Port: 1234}
 	if responses, err := CollectStream(pair.server.Announce(ctx, key, &QueryOpts{LocalAddr: localAddr})); err != nil {
 		t.Fatal("error announcing:", err)
@@ -161,8 +163,8 @@ func hyperDHTLocalTest(t *testing.T, ipv6 bool) {
 			resp := responses[0]
 			if len(resp.Peers) != 1 {
 				t.Errorf("lookup resulted in %d peers, expected 1\n\t%#v", len(resp.Peers), resp.Peers)
-			} else if resp.Peers[0].String() != serverAddr.String() {
-				t.Errorf("lookup returned peer %s, expected %s", resp.Peers[0], serverAddr)
+			} else if resp.Peers[0].String() != pair.server.Addr().String() {
+				t.Errorf("lookup returned peer %s, expected %s", resp.Peers[0], pair.server.Addr())
 			}
 
 			if expected {
@@ -181,11 +183,19 @@ func hyperDHTLocalTest(t *testing.T, ipv6 bool) {
 	runQuery(&net.UDPAddr{IP: net.IP{10, 10, 0, 98}, Port: 7531}, false)
 }
 
-func TestPortOverride(t *testing.T) {
-	pair := createPair(t, false)
+func TestPortOverride(t *testing.T) { dualIPTest(t, portOverrideTest) }
+func portOverrideTest(t *testing.T, ipv6 bool) {
+	pair := createPair(t, ipv6)
 	defer pair.Close()
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
 	defer done()
+
+	var expected string
+	if host, _, err := net.SplitHostPort(pair.server.Addr().String()); err != nil {
+		t.Fatalf("failed to split address %s: %v", pair.server.Addr(), err)
+	} else {
+		expected = net.JoinHostPort(host, "4321")
+	}
 
 	sum := sha256.Sum256([]byte("hello"))
 	key := sum[:]
@@ -203,46 +213,8 @@ func TestPortOverride(t *testing.T) {
 		resp := responses[0]
 		if len(resp.Peers) != 1 {
 			t.Errorf("lookup resulted in %d peers, expected 1\n\t%#v", len(resp.Peers), resp.Peers)
-		} else if resp.Peers[0].String() != "127.0.0.1:4321" {
-			t.Errorf("lookup returned peer %s, expected 127.0.0.1:4321", resp.Peers[0])
+		} else if resp.Peers[0].String() != expected {
+			t.Errorf("lookup returned peer %s, expected %s", resp.Peers[0], expected)
 		}
 	}
-}
-
-func TestIPv6(t *testing.T) {
-	// It seems it's really difficult to get the docker containers used by our CI test server
-	// to support IPv6 for more than a single container, so we make these tests conditional.
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		t.Fatal("failed to check interfaces for IPv6 support:", err)
-	}
-	loopbackFlag := net.FlagUp | net.FlagLoopback
-	var ipv6Support bool
-	for _, iface := range ifaces {
-		if iface.Flags&loopbackFlag != loopbackFlag {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			t.Fatalf("failed to get addresses from interface %v: %v", iface.Name, err)
-		}
-		for _, addr := range addrs {
-			if netAddr, ok := addr.(*net.IPNet); !ok {
-				t.Errorf("interface returned address of type %T, expected %T", addr, netAddr)
-			} else if netAddr.IP.Equal(net.IPv6loopback) {
-				ipv6Support = true
-			}
-		}
-	}
-	if !ipv6Support {
-		t.Skip("device doesn't appear to have an IPv6 loopback addr")
-	}
-
-	wrap := func(f func(*testing.T, bool)) func(*testing.T) {
-		return func(t *testing.T) {
-			f(t, true)
-		}
-	}
-	t.Run("dht-basic", wrap(hyperDHTBasicTest))
-	t.Run("dht-local", wrap(hyperDHTLocalTest))
 }

@@ -6,32 +6,16 @@ import (
 	"crypto/sha256"
 	"net"
 	"reflect"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"gitlab.daplie.com/core-sdk/hyperdht/fakeNetwork"
 )
 
-func localizeAddr(addr net.Addr, ipv6 bool) net.Addr {
-	var port int
-	if u, ok := addr.(*net.UDPAddr); ok {
-		port = u.Port
-	} else if t, ok := addr.(*net.TCPAddr); ok {
-		port = t.Port
-	} else if _, portStr, err := net.SplitHostPort(addr.String()); err != nil {
-		panic("invalid network address " + addr.String())
-	} else if port, err = strconv.Atoi(portStr); err != nil || port < 0 || port > (1<<16) {
-		panic("invalid network address " + addr.String())
-	}
-
-	if ipv6 {
-		return &net.UDPAddr{IP: net.IPv6loopback, Port: port}
-	}
-	return &net.UDPAddr{IP: net.IP{127, 0, 0, 1}, Port: port}
-}
-
 type dhtSwarm struct {
+	network   *fakeNetwork.FakeNetwork
 	bootstrap *DHT
 	servers   []*DHT
 	client    *DHT
@@ -51,6 +35,9 @@ func (s *dhtSwarm) Close() {
 	if err := s.client.Close(); err != nil {
 		errs = append(errs, err)
 	}
+	if err := s.network.Close(); err != nil {
+		errs = append(errs, err)
+	}
 
 	if errs != nil {
 		panic(errs)
@@ -58,14 +45,20 @@ func (s *dhtSwarm) Close() {
 }
 
 func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
-	result := new(dhtSwarm)
+	result := &dhtSwarm{network: fakeNetwork.New()}
+	modConfig := func(cfg *Config) *Config {
+		cp := *cfg
+		cp.Socket = result.network.NewNode(fakeNetwork.RandomAddress(ipv6), true)
+		return &cp
+	}
+
 	var err error
-	if result.bootstrap, err = New(&Config{Ephemeral: true, IPv6: ipv6}); err != nil {
+	if result.bootstrap, err = New(modConfig(&Config{Ephemeral: true, IPv6: ipv6})); err != nil {
 		t.Fatal("failed to create bootstrap node:", err)
 	}
 
 	cfg := &Config{
-		BootStrap: []net.Addr{localizeAddr(result.bootstrap.Addr(), ipv6)},
+		BootStrap: []net.Addr{result.bootstrap.Addr()},
 		IPv6:      ipv6,
 	}
 
@@ -90,7 +83,7 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 
 	wait.Add(size)
 	for i := 0; i < size; i++ {
-		if node, err := New(cfg); err != nil {
+		if node, err := New(modConfig(cfg)); err != nil {
 			if cnt := atomic.AddInt32(&failCnt, 1); cnt < 9 {
 				t.Errorf("failed to create server node #%d: %v", i, err)
 			} else if cnt == 9 {
@@ -107,11 +100,21 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 		t.Fatalf("failed to create/bootstrap %d of the server nodes", failCnt)
 	}
 
-	if result.client, err = New(cfg); err != nil {
+	if result.client, err = New(modConfig(cfg)); err != nil {
 		t.Fatal("failed to create the client node:", err)
 	}
 
 	return result
+}
+
+func dualIPTest(t *testing.T, f func(*testing.T, bool)) {
+	wrap := func(ipv6 bool) func(*testing.T) {
+		return func(t *testing.T) {
+			f(t, ipv6)
+		}
+	}
+	t.Run("ipv4", wrap(false))
+	t.Run("ipv6", wrap(true))
 }
 
 func testQuery(t *testing.T, pair *dhtSwarm, update bool, query *Query, opts *QueryOpts, respValue []byte) {
@@ -139,7 +142,8 @@ func testQuery(t *testing.T, pair *dhtSwarm, update bool, query *Query, opts *Qu
 		}
 	}
 }
-func TestSimpleQuery(t *testing.T) { simpleQueryTest(t, false) }
+
+func TestSimpleQuery(t *testing.T) { dualIPTest(t, simpleQueryTest) }
 func simpleQueryTest(t *testing.T, ipv6 bool) {
 	pair := createSwarm(t, 1, ipv6)
 	defer pair.Close()
@@ -172,7 +176,7 @@ func simpleQueryTest(t *testing.T, ipv6 bool) {
 	testQuery(t, pair, false, &query, nil, []byte("this is not the world"))
 }
 
-func TestSimpleUpdate(t *testing.T) { simpleUpdateTest(t, false) }
+func TestSimpleUpdate(t *testing.T) { dualIPTest(t, simpleUpdateTest) }
 func simpleUpdateTest(t *testing.T, ipv6 bool) {
 	pair := createSwarm(t, 1, ipv6)
 	defer pair.Close()
@@ -195,12 +199,13 @@ func simpleUpdateTest(t *testing.T, ipv6 bool) {
 	testQuery(t, pair, true, &update, nil, update.Value)
 }
 
-func TestTargetedQuery(t *testing.T) { targetedQueryTest(t, false) }
+func TestTargetedQuery(t *testing.T) { dualIPTest(t, targetedQueryTest) }
 func targetedQueryTest(t *testing.T, ipv6 bool) {
 	pair := createSwarm(t, 1, ipv6)
 	defer pair.Close()
 
-	serverB, err := New(&Config{BootStrap: pair.servers[0].bootstrap, Socket: pair.network.NewNode(true)})
+	serverBSock := pair.network.NewNode(fakeNetwork.RandomAddress(ipv6), true)
+	serverB, err := New(&Config{BootStrap: pair.servers[0].bootstrap, Socket: serverBSock})
 	if err != nil {
 		t.Fatal("creating second server errored", err)
 	}
@@ -235,18 +240,19 @@ func targetedQueryTest(t *testing.T, ipv6 bool) {
 	})
 
 	opts := &QueryOpts{
-		Nodes: []Node{basicNode{id: pair.servers[0].ID(), addr: localizeAddr(pair.servers[0].Addr(), ipv6)}},
+		Nodes: []Node{basicNode{id: pair.servers[0].ID(), addr: pair.servers[0].Addr()}},
 	}
 
 	testQuery(t, pair, false, &query, opts, []byte("world"))
 }
 
-func TestTargetedUpdate(t *testing.T) { targetedUpdateTest(t, false) }
+func TestTargetedUpdate(t *testing.T) { dualIPTest(t, targetedUpdateTest) }
 func targetedUpdateTest(t *testing.T, ipv6 bool) {
 	pair := createSwarm(t, 1, ipv6)
 	defer pair.Close()
 
-	serverB, err := New(&Config{BootStrap: pair.servers[0].bootstrap, Socket: pair.network.NewNode(true)})
+	serverBSock := pair.network.NewNode(fakeNetwork.RandomAddress(ipv6), true)
+	serverB, err := New(&Config{BootStrap: pair.servers[0].bootstrap, Socket: serverBSock})
 	if err != nil {
 		t.Fatal("creating second server errored", err)
 	}
@@ -291,13 +297,13 @@ func targetedUpdateTest(t *testing.T, ipv6 bool) {
 	})
 
 	opts := &QueryOpts{
-		Nodes: []Node{basicNode{id: pair.servers[0].ID(), addr: localizeAddr(pair.servers[0].Addr(), ipv6)}},
+		Nodes: []Node{basicNode{id: pair.servers[0].ID(), addr: pair.servers[0].Addr()}},
 	}
 
 	testQuery(t, pair, true, &update, opts, update.Value)
 }
 
-func TestDHTRateLimit(t *testing.T) { dHTRateLimitTest(t, false) }
+func TestDHTRateLimit(t *testing.T) { dualIPTest(t, dHTRateLimitTest) }
 func dHTRateLimitTest(t *testing.T, ipv6 bool) {
 	// We need a swarm so the query stream has more than one peer to query at a time.
 	swarm := createSwarm(t, 128, ipv6)
@@ -348,7 +354,7 @@ func dHTRateLimitTest(t *testing.T, ipv6 bool) {
 	}
 }
 
-func TestQueryRateLimit(t *testing.T) { queryRateLimitTest(t, false) }
+func TestQueryRateLimit(t *testing.T) { dualIPTest(t, queryRateLimitTest) }
 func queryRateLimitTest(t *testing.T, ipv6 bool) {
 	// We need a swarm so the query stream has more than one peer to query at a time.
 	swarm := createSwarm(t, 128, ipv6)
@@ -394,7 +400,7 @@ func queryRateLimitTest(t *testing.T, ipv6 bool) {
 	}
 }
 
-func TestSwarmQuery(t *testing.T) { swarmQueryTest(t, false) }
+func TestSwarmQuery(t *testing.T) { dualIPTest(t, swarmQueryTest) }
 func swarmQueryTest(t *testing.T, ipv6 bool) {
 	swarm := createSwarm(t, 256, ipv6)
 	defer swarm.Close()
@@ -434,17 +440,21 @@ func swarmQueryTest(t *testing.T, ipv6 bool) {
 		Command: "kv",
 		Target:  key[:],
 	}
-	stream := swarm.client.Query(ctx, &query, nil)
-	for resp := range stream.ResponseChan() {
-		if resp.Value != nil {
-			if !bytes.Equal(resp.Value, updateVal) {
-				t.Errorf("queried value %q doesn't match expected %q", resp.Value, updateVal)
+	if values, err := CollectValues(swarm.client.Query(ctx, &query, nil)); err != nil {
+		t.Error("query errored after update:", err)
+	} else {
+		if len(values) != 20 {
+			t.Errorf("query received %d responses with values, expected 20", len(values))
+		}
+		for _, val := range values {
+			if !bytes.Equal(val, updateVal) {
+				t.Errorf("queried value %q doesn't match expected %q", val, updateVal)
 			}
 		}
 	}
 }
 
-func TestNonEphemeralBootstrap(t *testing.T) { nonEphemeralBootstrapTest(t, false) }
+func TestNonEphemeralBootstrap(t *testing.T) { dualIPTest(t, nonEphemeralBootstrapTest) }
 func nonEphemeralBootstrapTest(t *testing.T, ipv6 bool) {
 	swarm := createSwarm(t, 32, ipv6)
 	defer swarm.Close()
@@ -454,7 +464,7 @@ func nonEphemeralBootstrapTest(t *testing.T, ipv6 bool) {
 	}
 	swarm.client.bootstrap = make([]net.Addr, 20)
 	for i := range swarm.client.bootstrap {
-		swarm.client.bootstrap[i] = localizeAddr(swarm.servers[i].Addr(), ipv6)
+		swarm.client.bootstrap[i] = swarm.servers[i].Addr()
 	}
 
 	for i, node := range swarm.servers {
@@ -476,51 +486,7 @@ func nonEphemeralBootstrapTest(t *testing.T, ipv6 bool) {
 		Command: "query",
 		Target:  key[:],
 	}
-	if _, err := CollectStream(swarm.client.Update(ctx, &query, nil)); err != nil {
+	if err := DiscardStream(swarm.client.Update(ctx, &query, nil)); err != nil {
 		t.Error("query errored:", err)
 	}
-}
-
-func TestIPv6(t *testing.T) {
-	// It seems it's really difficult to get the docker containers used by our CI test server
-	// to support IPv6 for more than a single container, so we make these tests conditional.
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		t.Fatal("failed to check interfaces for IPv6 support:", err)
-	}
-	loopbackFlag := net.FlagUp | net.FlagLoopback
-	var ipv6Support bool
-	for _, iface := range ifaces {
-		if iface.Flags&loopbackFlag != loopbackFlag {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			t.Fatalf("failed to get addresses from interface %v: %v", iface.Name, err)
-		}
-		for _, addr := range addrs {
-			if netAddr, ok := addr.(*net.IPNet); !ok {
-				t.Errorf("interface returned address of type %T, expected %T", addr, netAddr)
-			} else if netAddr.IP.Equal(net.IPv6loopback) {
-				ipv6Support = true
-			}
-		}
-	}
-	if !ipv6Support {
-		t.Skip("device doesn't appear to have an IPv6 loopback addr")
-	}
-
-	wrap := func(f func(*testing.T, bool)) func(*testing.T) {
-		return func(t *testing.T) {
-			f(t, true)
-		}
-	}
-	t.Run("simple-query", wrap(simpleQueryTest))
-	t.Run("simple-update", wrap(simpleUpdateTest))
-	t.Run("targeted-query", wrap(targetedQueryTest))
-	t.Run("targeted-update", wrap(targetedUpdateTest))
-	t.Run("dht-rate-limit", wrap(dHTRateLimitTest))
-	t.Run("query-rate-limit", wrap(queryRateLimitTest))
-	t.Run("swarm-query", wrap(swarmQueryTest))
-	t.Run("non-ephemeral-bootstrap", wrap(nonEphemeralBootstrapTest))
 }
