@@ -47,8 +47,9 @@ type Config struct {
 
 	// Allows for custom socket types or instances to be used. If Socket is nil a new net.UDPConn
 	// is created that will listen on the specified port.
-	Socket net.PacketConn
-	Port   int
+	Socket  net.PacketConn
+	Port    int
+	timeout time.Duration
 }
 
 // A DHT holds everything needed to send RPC calls over a distributed hash table.
@@ -571,8 +572,9 @@ func New(cfg *Config) (*DHT, error) {
 	// This should be the last step that can fail since it would otherwise have to be closed
 	// if there were any other errors.
 	result.socket, err = udpRequest.New(&udpRequest.Config{
-		Socket: c.Socket,
-		Port:   c.Port,
+		Socket:  c.Socket,
+		Port:    c.Port,
+		Timeout: c.timeout,
 	})
 	if err != nil {
 		return nil, errors.WithMessage(err, "creating socket")
