@@ -113,7 +113,7 @@ func (s *QueryStream) runStream() {
 		} else if s.respCnt == 0 {
 			s.errChan <- noResponseErr("no nodes responded")
 		} else if committing && s.commitCnt == 0 {
-			s.errChan <- noResponseErr("no close node responded to update")
+			s.errChan <- noResponseErr("no close nodes responded to update")
 		} else {
 			s.errChan <- nil
 		}

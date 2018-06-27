@@ -85,7 +85,7 @@ func (n *FakeNode) Close() error {
 	if n.network == nil {
 		panic("cannot use unattached FakeNode")
 	}
-	n.network.rmNode(n.addr.String())
+	n.network.rmNode(n)
 	n.done()
 	return nil
 }

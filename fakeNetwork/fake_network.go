@@ -64,9 +64,11 @@ func (n *FakeNetwork) getNode(remote, local string) *FakeNode {
 	}
 	return node
 }
-func (n *FakeNetwork) rmNode(addr string) {
+func (n *FakeNetwork) rmNode(node *FakeNode) {
 	n.lock.Lock()
-	delete(n.nodes, addr)
+	if addr := node.addr.String(); n.nodes[addr] == node {
+		delete(n.nodes, addr)
+	}
 	n.lock.Unlock()
 }
 

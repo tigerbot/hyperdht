@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"net"
 	"reflect"
+	"regexp"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"gitlab.daplie.com/core-sdk/hyperdht/fakeNetwork"
 )
 
@@ -287,5 +289,141 @@ func nonEphemeralBootstrapTest(t *testing.T, ipv6 bool) {
 	}
 	if err := DiscardStream(swarm.client.Update(ctx, &query, nil)); err != nil {
 		t.Error("query errored:", err)
+	}
+}
+
+func TestQueryCancel(t *testing.T) {
+	swarm := createSwarm(t, 16, false)
+	defer swarm.Close()
+
+	// Make sure there will be a few pending requests when the context expires.
+	for _, node := range swarm.servers[:8] {
+		node.OnQuery("", func(Node, *Query) ([]byte, error) {
+			return nil, errors.New("this node will not respond")
+		})
+	}
+
+	ctx, done := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer done()
+
+	query := &Query{Command: "command", Target: swarm.servers[0].ID()}
+	opts := &QueryOpts{Concurrency: 12}
+	stream := swarm.client.Query(ctx, query, opts)
+
+	for {
+		select {
+		case err := <-stream.WarningChan():
+			t.Errorf("received unexpected warning when context closed: %v", err)
+
+		case err := <-stream.ErrorChan():
+			if err == nil || err.Error() != ctx.Err().Error() {
+				t.Errorf("final error was %v, expected %v", err, ctx.Err())
+			}
+			if dl, ok := ctx.Deadline(); !ok {
+				t.Error("context says it doesn't have a deadline. HOW?!?!?")
+			} else if dur := time.Now().Sub(dl); dur >= time.Millisecond {
+				t.Errorf("stream took %s to end after context expired, expected < 1ms", dur)
+			} else {
+				t.Logf("stream exitted within %s of context expiration", dur)
+			}
+			return
+		}
+	}
+}
+
+func TestQueryError(t *testing.T) {
+	swarm := createSwarm(t, 10, false)
+	defer swarm.Close()
+
+	swarm.client.Close()
+	cfg := &Config{
+		BootStrap: []net.Addr{swarm.bootstrap.Addr()},
+		Socket:    swarm.network.NewNode(swarm.client.Addr(), true),
+		timeout:   5 * time.Millisecond,
+	}
+	if client, err := New(cfg); err != nil {
+		t.Fatal("failed to make new client with timeout:", err)
+	} else {
+		swarm.client = client
+	}
+
+	re := regexp.MustCompile(`no ([\w]+ )?nodes responded`)
+	type tmpTimeoutErr interface {
+		error
+		Temporary() bool
+		Timeout() bool
+	}
+	validateErr := func(stage string, err error) {
+		if err == nil {
+			t.Errorf("%s did not fail when no nodes should have responded", stage)
+			return
+		}
+		if !re.MatchString(err.Error()) {
+			t.Errorf("%s error message %q does not match %v", stage, err, re)
+		}
+		if tErr, ok := err.(tmpTimeoutErr); !ok {
+			t.Errorf("%s error missing Temporary or Timeout methods: %#v", stage, err)
+		} else if !tErr.Temporary() || !tErr.Timeout() {
+			t.Errorf("%s error did not return true for Temporary and Timeout", stage)
+		}
+	}
+
+	query := &Query{Command: "command", Target: swarm.servers[0].ID()}
+	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	defer done()
+
+	// Make it so that none of the server will respond to an update request
+	for _, node := range swarm.servers {
+		node.OnUpdate("", func(Node, *Query) ([]byte, error) {
+			return nil, errors.New("this node will not respond")
+		})
+	}
+	stream := swarm.client.Update(ctx, query, nil)
+	resp, err := CollectStream(stream)
+	if cnt := stream.CommitCnt(); cnt != 0 {
+		t.Errorf("update stream has commit count %d, expected 0", cnt)
+	} else if cnt = stream.ResponseCnt(); cnt == 0 {
+		t.Error("update stream had no responses, expected responses from query part")
+	}
+	validateErr("update", err)
+	if len(resp) != 0 {
+		t.Errorf("received %d responses from non-verbose update", len(resp))
+	}
+
+	// Now make it so that none of the server will respond to a query request
+	for _, node := range swarm.servers {
+		node.OnQuery("", func(Node, *Query) ([]byte, error) {
+			return nil, errors.New("this node will not respond")
+		})
+	}
+
+	// Need to bootstrap so we don't count the response from the bootstrap node. The nodes we
+	// had before will have been removed because the update requests failed.
+	if err := swarm.client.Bootstrap(ctx); err != nil {
+		t.Fatal("failed to bootstrap node before query:", err)
+	}
+
+	stream = swarm.client.Query(ctx, query, nil)
+	var warnCnt int
+	for {
+		select {
+		case <-stream.WarningChan():
+			warnCnt++
+
+		case resp, ok := <-stream.ResponseChan():
+			if ok {
+				t.Errorf("query stream received unexpected response: %v", resp)
+				break
+			}
+			err := <-stream.ErrorChan()
+			validateErr("query", err)
+			if cnt := stream.ResponseCnt(); cnt != 0 {
+				t.Errorf("query stream has response count %d, expected 0", cnt)
+			}
+			if warnCnt == 0 {
+				t.Error("did not receive any errors on the warning channel")
+			}
+			return
+		}
 	}
 }
