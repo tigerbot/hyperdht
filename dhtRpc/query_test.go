@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"gitlab.daplie.com/core-sdk/hyperdht/fakeNetwork"
 )
 
 func testQuery(t *testing.T, pair *dhtSwarm, update bool, query *Query, opts *QueryOpts, respValue []byte) {
@@ -99,33 +98,25 @@ func simpleUpdateTest(t *testing.T, ipv6 bool) {
 
 func TestTargetedQuery(t *testing.T) { dualIPTest(t, targetedQueryTest) }
 func targetedQueryTest(t *testing.T, ipv6 bool) {
-	pair := createSwarm(t, 1, ipv6)
+	pair := createSwarm(t, 4, ipv6)
 	defer pair.Close()
 
-	serverBSock := pair.network.NewNode(fakeNetwork.RandomAddress(ipv6), true)
-	serverB, err := New(&Config{BootStrap: pair.servers[0].bootstrap, Socket: serverBSock})
-	if err != nil {
-		t.Fatal("creating second server errored", err)
+	for i, server := range pair.servers[1:] {
+		ind := i
+		server.OnQuery("", func(Node, *Query) ([]byte, error) {
+			t.Errorf("server #%d was accessed", ind)
+			return nil, nil
+		})
 	}
-	defer serverB.Close()
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
-	if err := serverB.Bootstrap(ctx); err != nil {
-		t.Fatal("bootstrapping second server errored", err)
-	}
-	done()
-	serverB.OnQuery("", func(Node, *Query) ([]byte, error) {
-		t.Error("the second server was accessed")
-		return nil, nil
-	})
 	pair.client.OnQuery("", func(Node, *Query) ([]byte, error) {
 		t.Error("the client was accessed")
 		return nil, nil
 	})
 
-	// Use serverB's ID as target to make sure it's not visited even when it's closer.
+	// Use a different server's ID as target to make sure it's not visited even when it's closer.
 	query := Query{
 		Command: "hello",
-		Target:  serverB.ID(),
+		Target:  pair.servers[2].ID(),
 	}
 	pair.servers[0].OnQuery("hello", func(n Node, q *Query) ([]byte, error) {
 		if !bytes.Equal(n.ID(), pair.client.ID()) {
@@ -137,38 +128,25 @@ func targetedQueryTest(t *testing.T, ipv6 bool) {
 		return []byte("world"), nil
 	})
 
-	opts := &QueryOpts{
-		Nodes: []Node{basicNode{id: pair.servers[0].ID(), addr: pair.servers[0].Addr()}},
-	}
-
-	testQuery(t, pair, false, &query, opts, []byte("world"))
+	testQuery(t, pair, false, &query, &QueryOpts{Nodes: []Node{pair.servers[0]}}, []byte("world"))
 }
 
 func TestTargetedUpdate(t *testing.T) { dualIPTest(t, targetedUpdateTest) }
 func targetedUpdateTest(t *testing.T, ipv6 bool) {
-	pair := createSwarm(t, 1, ipv6)
+	pair := createSwarm(t, 4, ipv6)
 	defer pair.Close()
 
-	serverBSock := pair.network.NewNode(fakeNetwork.RandomAddress(ipv6), true)
-	serverB, err := New(&Config{BootStrap: pair.servers[0].bootstrap, Socket: serverBSock})
-	if err != nil {
-		t.Fatal("creating second server errored", err)
+	for i, server := range pair.servers[1:] {
+		ind := i
+		server.OnQuery("", func(Node, *Query) ([]byte, error) {
+			t.Errorf("server #%d query handler was accessed", ind)
+			return nil, nil
+		})
+		server.OnUpdate("", func(Node, *Query) ([]byte, error) {
+			t.Errorf("server #%d update handler was accessed", ind)
+			return nil, nil
+		})
 	}
-	defer serverB.Close()
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
-	if err := serverB.Bootstrap(ctx); err != nil {
-		t.Fatal("bootstrapping second server errored", err)
-	}
-	done()
-	serverB.OnQuery("", func(Node, *Query) ([]byte, error) {
-		t.Error("the second server's query handler was accessed")
-		return nil, nil
-	})
-	serverB.OnUpdate("", func(Node, *Query) ([]byte, error) {
-		t.Error("the second server's update handler was accessed")
-		return nil, nil
-	})
-
 	pair.client.OnQuery("", func(Node, *Query) ([]byte, error) {
 		t.Error("the client's query handler was accessed")
 		return nil, nil
@@ -178,10 +156,10 @@ func targetedUpdateTest(t *testing.T, ipv6 bool) {
 		return nil, nil
 	})
 
-	// Use serverB's ID as target to make sure it's not visited even when it's closer.
+	// Use a different server's ID as target to make sure it's not visited even when it's closer.
 	update := Query{
 		Command: "echo",
-		Target:  serverB.ID(),
+		Target:  pair.servers[2].ID(),
 		Value:   []byte("Hello World!"),
 	}
 	pair.servers[0].OnUpdate("echo", func(n Node, q *Query) ([]byte, error) {
@@ -194,11 +172,7 @@ func targetedUpdateTest(t *testing.T, ipv6 bool) {
 		return q.Value, nil
 	})
 
-	opts := &QueryOpts{
-		Nodes: []Node{basicNode{id: pair.servers[0].ID(), addr: pair.servers[0].Addr()}},
-	}
-
-	testQuery(t, pair, true, &update, opts, update.Value)
+	testQuery(t, pair, true, &update, &QueryOpts{Nodes: []Node{pair.servers[0]}}, update.Value)
 }
 
 func TestSwarmQuery(t *testing.T) { dualIPTest(t, swarmQueryTest) }
