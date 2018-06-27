@@ -321,7 +321,7 @@ func TestQueryCancel(t *testing.T) {
 			}
 			if dl, ok := ctx.Deadline(); !ok {
 				t.Error("context says it doesn't have a deadline. HOW?!?!?")
-			} else if dur := time.Now().Sub(dl); dur >= time.Millisecond {
+			} else if dur := time.Now().Sub(dl); dur >= time.Millisecond && !raceDetector {
 				t.Errorf("stream took %s to end after context expired, expected < 1ms", dur)
 			} else {
 				t.Logf("stream exitted within %s of context expiration", dur)

@@ -12,7 +12,7 @@ coverage:
     mkdir -p cover;
     PKG_LIST=$(go list ./... | grep -v -e \"/cmd/\" -e \"internal/protoSchemas\");
     for pkg in ${PKG_LIST}; do
-      go test $pkg -covermode=count -coverprofile cover/${pkg##*/}.out -timeout 2m;
+      go test $pkg -covermode=count -coverprofile cover/${pkg##*/}.out -timeout 2m -v;
     done;
 
     echo \"mode: count\" > cover/total.cov;
@@ -21,4 +21,4 @@ coverage:
   '"
 
 race:
-  script: go test ./... -race -timeout 5m
+  script: go test ./... -race -timeout 5m -v

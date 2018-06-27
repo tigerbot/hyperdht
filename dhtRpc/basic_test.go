@@ -11,6 +11,8 @@ import (
 	"gitlab.daplie.com/core-sdk/hyperdht/fakeNetwork"
 )
 
+var raceDetector = false
+
 type dhtSwarm struct {
 	network   *fakeNetwork.FakeNetwork
 	bootstrap *DHT
@@ -59,10 +61,14 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 		IPv6:      ipv6,
 	}
 
-	// We have a rather long timeout here for the race condition tests. With how many routines
-	// we spawn here it takes a lot of work for the race detector to do whatever it needs to do
-	// to detect the races, so we allow it plenty of time. Normal tests Shouldn't take that long.
-	ctx, done := context.WithTimeout(context.Background(), time.Minute)
+	// The race detector seriously slows things down, especially when we are spawning as many
+	// routines as we do with a large swarm. As such we need to have a much longer timeout when
+	// the race detector is active.
+	timeout := time.Second
+	if raceDetector {
+		timeout = time.Minute
+	}
+	ctx, done := context.WithTimeout(context.Background(), timeout)
 	defer done()
 	var wait sync.WaitGroup
 	var failCnt int32
