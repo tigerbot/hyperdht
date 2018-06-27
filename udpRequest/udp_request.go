@@ -64,9 +64,9 @@ type PeerRequest struct {
 }
 
 type pendingRequest struct {
-	c    chan []byte
-	addr net.Addr
-	buf  []byte
+	addr     net.Addr
+	sendBuf  []byte
+	response chan []byte
 
 	timeout  int
 	retryCnt int
@@ -104,9 +104,9 @@ func (u *UDPRequest) register(id int, addr net.Addr, buf []byte) <-chan []byte {
 	}
 
 	p := pendingRequest{
-		c:    make(chan []byte, 1),
-		addr: addr,
-		buf:  buf,
+		addr:     addr,
+		sendBuf:  buf,
+		response: make(chan []byte, 1),
 
 		timeout: timeoutDiv + 1,
 	}
@@ -115,7 +115,7 @@ func (u *UDPRequest) register(id int, addr net.Addr, buf []byte) <-chan []byte {
 	}
 	u.pending[id] = &p
 
-	return p.c
+	return p.response
 }
 func (u *UDPRequest) unregister(id int) {
 	u.lock.Lock()
@@ -127,6 +127,8 @@ func (u *UDPRequest) checkTimeouts(timeout time.Duration) {
 	ticker := time.NewTicker(timeout / timeoutDiv)
 	defer ticker.Stop()
 
+	// The lock is primarily for the map, so we can use the RLock even though we do write to some
+	// of the values (ie timeout and retryCnt) on each request.
 	u.lock.RLock()
 	defer u.lock.RUnlock()
 	for {
@@ -143,9 +145,19 @@ func (u *UDPRequest) checkTimeouts(timeout time.Duration) {
 			} else if p.retryCnt < len(retries) {
 				p.timeout = retries[p.retryCnt]
 				p.retryCnt++
-				u.socket.WriteTo(p.buf, p.addr)
+				u.socket.WriteTo(p.sendBuf, p.addr)
 			} else {
-				p.c <- nil
+				// We don't want to hit this condition again for this request even if the timeout is
+				// short enough for us to run this loop again before the request is unregistered, so
+				// we set the timeout really high such that it shouldn't be able to get to 0 again.
+				p.timeout = 1e6
+				// And just as an added precaution we also put the send in a select statement. Since
+				// the channel is buffered and only read once, we can be sure that if we hit the
+				// default case the value wouldn't be used anyway.
+				select {
+				case p.response <- nil:
+				default:
+				}
 			}
 		}
 	}
@@ -190,7 +202,10 @@ func (u *UDPRequest) readMessages() {
 			if p != nil {
 				cp := make([]byte, n-2)
 				copy(cp, buf[2:])
-				p.c <- cp
+				select {
+				case p.response <- cp:
+				default:
+				}
 			}
 		}
 	}
@@ -214,8 +229,8 @@ func (u *UDPRequest) Request(ctx context.Context, peer net.Addr, req []byte) ([]
 	buf[1] = byte((header & 0x00ff) >> 0)
 	copy(buf[2:], req)
 
-	c := u.register(id, peer, buf)
-	if c == nil {
+	resChan := u.register(id, peer, buf)
+	if resChan == nil {
 		return nil, timeoutErr{}
 	}
 	defer u.unregister(id)
@@ -227,7 +242,7 @@ func (u *UDPRequest) Request(ctx context.Context, peer net.Addr, req []byte) ([]
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case res := <-c:
+	case res := <-resChan:
 		if res != nil {
 			return res, nil
 		}
@@ -273,7 +288,10 @@ func (u *UDPRequest) Close() error {
 	u.lock.Lock()
 	defer u.lock.Unlock()
 	for _, p := range u.pending {
-		p.c <- nil
+		select {
+		case p.response <- nil:
+		default:
+		}
 	}
 	u.pending = nil
 
