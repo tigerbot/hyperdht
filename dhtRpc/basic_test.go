@@ -2,7 +2,6 @@ package dhtRpc
 
 import (
 	"context"
-	"math/rand"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -103,14 +102,15 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 		err := errors.New("no bootstrap attempted")
 		for tries := 0; tries < 4 && err != nil; tries++ {
 			// Unless the size of our swarm is one, we want more from our bootstrap than simply not
-			// erroring. We also want to have other nodes stored in our list.
+			// erroring. We also want to have other nodes stored in our list. Otherwise we can't be
+			// sure that we're actually able to communicate with any other nodes through the "NAT".
 			err = node.Bootstrap(ctx)
 			if err == nil && size > 1 && len(node.Nodes()) == 0 {
 				err = errors.New("no nodes acquired in list")
 			}
 
 			if err != nil {
-				time.Sleep(time.Millisecond + time.Duration(rand.Int63n(int64(time.Millisecond))))
+				time.Sleep(time.Duration(tries+1) * swarmBootstrapTimeout / 1000)
 			}
 		}
 
