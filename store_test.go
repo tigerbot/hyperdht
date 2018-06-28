@@ -3,6 +3,7 @@ package hyperdht
 import (
 	"crypto/rand"
 	"fmt"
+	"runtime"
 	"testing"
 )
 
@@ -12,13 +13,16 @@ func testStoreIterator(t *testing.T, getNext func() *peerInfo, infos ...*peerInf
 		peerMap[peer] = false
 	}
 
+	var failed bool
 	for {
 		if next := getNext(); next == nil {
 			break
 		} else if visited, expected := peerMap[next]; !expected {
-			t.Errorf("received unexpected peer: %#v", next)
+			t.Errorf("received unexpected peer: %p (%x)", next, next.encoded)
+			failed = true
 		} else if visited {
-			t.Errorf("received peer multiple times: %#v", next)
+			t.Errorf("received peer multiple times: %p (%x)", next, next.encoded)
+			failed = true
 		} else {
 			peerMap[next] = true
 		}
@@ -26,8 +30,14 @@ func testStoreIterator(t *testing.T, getNext func() *peerInfo, infos ...*peerInf
 
 	for peer, visited := range peerMap {
 		if !visited {
-			t.Errorf("did not receive expected peer: %#v", peer)
+			t.Errorf("did not receive expected peer: %p (%x)", peer, peer.encoded)
+			failed = true
 		}
+	}
+
+	if failed {
+		_, _, line, _ := runtime.Caller(1)
+		t.Fatalf("check on line %d failed, all subsequent checks will likely also fail", line)
 	}
 }
 
@@ -87,4 +97,39 @@ func TestStoreMultiple(t *testing.T) {
 		update(i)
 	}
 	testStoreIterator(t, s.Iterator("test-key"), infos[:8]...)
+
+	// Delete the nodes that should be left in the old list and make sure the olds lists are empty
+	s.Del("test-key", "test-id-6")
+	s.Del("test-key", "test-id-7")
+	testStoreIterator(t, s.Iterator("test-key"), infos[:6]...)
+	if len(s.prevLists) != 0 || len(s.prevValues) != 0 {
+		t.Errorf("previous list/values should be empty now but aren't: %#v", &s)
+	}
+
+	// garbage collect to put all stored values in old list, then manipulate the size so the
+	// next Put calls will trigger the garbage collection again. After that only the most
+	// recently stored infos should still be in the list.
+	s.gc()
+	testStoreIterator(t, s.Iterator("test-key"), infos[:6]...)
+	s.size = maxSize - 2
+	s.Put("test-key", "test-id-6", infos[6])
+	s.Put("test-key", "test-id-7", infos[7])
+	testStoreIterator(t, s.Iterator("test-key"), infos[6], infos[7])
+}
+
+func TestStoreConsistency(t *testing.T) {
+	var s store
+	s.gc()
+
+	s.Put("test-key", "test-id-0", &peerInfo{encoded: []byte("not actually a peer")})
+	s.Put("test-key", "test-id-1", &peerInfo{encoded: []byte("also not a peer")})
+
+	list := s.lists["test-key"]
+	list[0].index = 1
+	defer func() {
+		if err := recover(); err == nil {
+			t.Error("store did not panic when internal state was inconsistent")
+		}
+	}()
+	s.Del("test-key", "test-id-0")
 }
