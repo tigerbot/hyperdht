@@ -15,7 +15,7 @@ import (
 )
 
 func testQuery(t *testing.T, pair *dhtSwarm, update bool, query *Query, opts *QueryOpts, respValue []byte) {
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	ctx, done := context.WithTimeout(context.Background(), stdTimeout)
 	defer done()
 
 	var stream *QueryStream
@@ -139,7 +139,7 @@ func targetedUpdateTest(t *testing.T, ipv6 bool) {
 
 	// We bootstrap the client both so it can get through the "NAT" and so it has stored nodes
 	// that it *could* use if we didn't manually specify the list.
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	ctx, done := context.WithTimeout(context.Background(), stdTimeout)
 	if err := pair.client.Bootstrap(ctx); err != nil {
 		t.Fatal("failed to bootstrap client:", err)
 	}
@@ -202,7 +202,7 @@ func swarmQueryTest(t *testing.T, ipv6 bool) {
 		})
 	}
 
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	ctx, done := context.WithTimeout(context.Background(), stdTimeout)
 	defer done()
 
 	key := sha256.Sum256([]byte("hello"))
@@ -263,7 +263,7 @@ func nonEphemeralBootstrapTest(t *testing.T, ipv6 bool) {
 		})
 	}
 
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	ctx, done := context.WithTimeout(context.Background(), stdTimeout)
 	defer done()
 
 	key := sha256.Sum256([]byte("hello"))
@@ -341,7 +341,7 @@ func TestUpdateError(t *testing.T) {
 	defer swarm.Close()
 
 	query := &Query{Command: "command", Target: swarm.servers[0].ID()}
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	ctx, done := context.WithTimeout(context.Background(), stdTimeout)
 	defer done()
 
 	// Make it so that none of the server will respond to an update request
@@ -367,7 +367,7 @@ func TestQueryError(t *testing.T) {
 	defer swarm.Close()
 
 	query := &Query{Command: "command", Target: swarm.servers[0].ID()}
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	ctx, done := context.WithTimeout(context.Background(), stdTimeout)
 	defer done()
 
 	// Now make it so that none of the server will respond to a query request

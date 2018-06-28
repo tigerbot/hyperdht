@@ -12,13 +12,13 @@ func TestDHTRateLimit(t *testing.T) {
 	defer swarm.Close()
 	for _, s := range swarm.servers {
 		s.OnQuery("", func(Node, *Query) ([]byte, error) {
-			time.Sleep(time.Millisecond)
+			time.Sleep(rateTestResponsDelay)
 			return []byte("world"), nil
 		})
 	}
 
 	const parellel = 4
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	ctx, done := context.WithTimeout(context.Background(), stdTimeout)
 	defer done()
 	streamFinished := make(chan bool)
 	for i := 0; i < parellel; i++ {
@@ -35,7 +35,7 @@ func TestDHTRateLimit(t *testing.T) {
 	}
 
 	var finished int
-	ticker := time.NewTicker(time.Millisecond / 4)
+	ticker := time.NewTicker(rateCheckInterval)
 	defer ticker.Stop()
 	var counts []int
 	for {
@@ -62,12 +62,12 @@ func TestQueryRateLimit(t *testing.T) {
 	defer swarm.Close()
 	for _, s := range swarm.servers {
 		s.OnQuery("", func(Node, *Query) ([]byte, error) {
-			time.Sleep(time.Millisecond)
+			time.Sleep(rateTestResponsDelay)
 			return []byte("world"), nil
 		})
 	}
 
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	ctx, done := context.WithTimeout(context.Background(), stdTimeout)
 	defer done()
 	streamFinished := make(chan bool)
 
@@ -82,7 +82,7 @@ func TestQueryRateLimit(t *testing.T) {
 		}
 	}()
 
-	ticker := time.NewTicker(time.Millisecond / 4)
+	ticker := time.NewTicker(rateCheckInterval)
 	defer ticker.Stop()
 	var counts []int
 	for {

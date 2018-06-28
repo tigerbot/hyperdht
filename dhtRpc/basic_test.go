@@ -2,16 +2,26 @@ package dhtRpc
 
 import (
 	"context"
+	"math/rand"
 	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"gitlab.daplie.com/core-sdk/hyperdht/fakeNetwork"
 )
 
-var raceDetector = false
+// These values are all modified in the `race_test.go` file that is only included in the build
+// if the tests are being run with the race detector.
+var (
+	raceDetector          = false
+	stdTimeout            = time.Second
+	swarmBootstrapTimeout = time.Second
+	rateCheckInterval     = time.Millisecond / 4
+	rateTestResponsDelay  = time.Millisecond
+)
 
 type dhtSwarm struct {
 	network   *fakeNetwork.FakeNetwork
@@ -49,7 +59,7 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 		cp := *cfg
 		// Only make the bootstrap node public
 		cp.Socket = result.network.NewNode(fakeNetwork.RandomAddress(ipv6), cp.BootStrap == nil)
-		cp.timeout = 15 * time.Millisecond
+		cp.timeout = 10 * time.Millisecond
 		return &cp
 	}
 
@@ -63,48 +73,56 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 		IPv6:      ipv6,
 	}
 
-	// The race detector seriously slows things down, especially when we are spawning as many
-	// routines as we do with a large swarm. As such we need to have a much longer timeout when
-	// the race detector is active.
-	timeout := time.Second
-	if raceDetector {
-		timeout = time.Minute
-	}
-	ctx, done := context.WithTimeout(context.Background(), timeout)
+	ctx, done := context.WithTimeout(context.Background(), swarmBootstrapTimeout)
 	defer done()
 
-	// 32 nodes bootstrapping at a time should be enough for any potential racey conditions to
+	var failCnt int32
+	logErr := func(action string, ind int, err error) {
+		if cnt := atomic.AddInt32(&failCnt, 1); cnt < 9 {
+			t.Errorf("failed to %s server node #%d: %v", action, ind, err)
+		} else if cnt == 9 {
+			t.Log("too many errors, suppressing logs for the remains errors")
+		}
+	}
+
+	// 16 nodes bootstrapping at a time should be enough for any potential racey conditions to
 	// show themselves, and throttling it actually makes the race test run faster. It also helps
-	// with the holepunching part of the bootstrap process, though I'm not 100% sure why.
-	throttle := make(chan bool, 32)
+	// reduce the timing inconsistencies introduced when we put the bootstrap node under such a
+	// heavy load (it's responsible for helping everyone holepunch to almost anyone else).
+	throttle := make(chan bool, 16)
 	for len(throttle) < cap(throttle) {
 		throttle <- true
 	}
 	var wait sync.WaitGroup
-	var failCnt int32
 	start := func(ind int, node *DHT) {
 		defer wait.Done()
 
 		<-throttle
 		defer func() { throttle <- true }()
 
-		if err := node.Bootstrap(ctx); err != nil {
-			if cnt := atomic.AddInt32(&failCnt, 1); cnt < 9 {
-				t.Errorf("failed to bootstrap server node #%d: %v", ind, err)
-			} else if cnt == 9 {
-				t.Log("too many errors, suppressing logs for the remains errors")
+		err := errors.New("no bootstrap attempted")
+		for tries := 0; tries < 4 && err != nil; tries++ {
+			// Unless the size of our swarm is one, we want more from our bootstrap than simply not
+			// erroring. We also want to have other nodes stored in our list.
+			err = node.Bootstrap(ctx)
+			if err == nil && size > 1 && len(node.Nodes()) == 0 {
+				err = errors.New("no nodes acquired in list")
 			}
+
+			if err != nil {
+				time.Sleep(time.Millisecond + time.Duration(rand.Int63n(int64(time.Millisecond))))
+			}
+		}
+
+		if err != nil {
+			logErr("bootstrap", ind, err)
 		}
 	}
 
 	wait.Add(size)
 	for i := 0; i < size; i++ {
 		if node, err := New(modConfig(cfg)); err != nil {
-			if cnt := atomic.AddInt32(&failCnt, 1); cnt < 9 {
-				t.Errorf("failed to create server node #%d: %v", i, err)
-			} else if cnt == 9 {
-				t.Log("too many errors, suppressing logs for the remains errors")
-			}
+			logErr("create", i, err)
 			wait.Done()
 		} else {
 			result.servers = append(result.servers, node)

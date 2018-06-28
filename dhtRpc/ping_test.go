@@ -15,7 +15,7 @@ func pingTest(t *testing.T, ipv6 bool) {
 	network := fakeNetwork.New()
 	defer network.Close()
 
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	ctx, done := context.WithTimeout(context.Background(), stdTimeout)
 	defer done()
 
 	node1 := createDHTNode(t, network, ipv6, true)
@@ -35,7 +35,7 @@ func holepunchTest(t *testing.T, ipv6 bool) {
 	network := fakeNetwork.New()
 	defer network.Close()
 
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	ctx, done := context.WithTimeout(context.Background(), stdTimeout)
 	defer done()
 
 	middle := createDHTNode(t, network, ipv6, true)
@@ -66,7 +66,7 @@ func TestCrossEncodingPing(t *testing.T) {
 	network := fakeNetwork.New()
 	defer network.Close()
 
-	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	ctx, done := context.WithTimeout(context.Background(), stdTimeout)
 	defer done()
 
 	middle := createDHTNode(t, network, false, true)
