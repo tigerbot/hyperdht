@@ -79,7 +79,7 @@ type DHT struct {
 	nodes storedNodeList
 
 	socket *udpRequest.UDPRequest
-	done   chan struct{}
+	done   context.CancelFunc
 }
 
 // ID returns the ID being used by the DHT.
@@ -116,13 +116,13 @@ func (d *DHT) closest(target []byte, count int) []Node {
 	return nodes
 }
 
-func (d *DHT) updateTick() {
+func (d *DHT) updateTick(ctx context.Context) {
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-d.done:
+		case <-ctx.Done():
 			return
 
 		case <-ticker.C:
@@ -184,13 +184,13 @@ func (d *DHT) validToken(peer net.Addr, cmd string, token []byte) bool {
 
 	return false
 }
-func (d *DHT) rotateSecrets() {
+func (d *DHT) rotateSecrets(ctx context.Context) {
 	ticker := time.NewTicker(secretLifetime)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-d.done:
+		case <-ctx.Done():
 			return
 
 		case <-ticker.C:
@@ -517,12 +517,7 @@ func (d *DHT) Bootstrap(ctx context.Context) error {
 // Close shuts down the underlying socket and quits all of the background go routines handling
 // periodic tasks. The underlying socket is closed even if it was initially provided in the config.
 func (d *DHT) Close() error {
-	select {
-	case <-d.done:
-	default:
-		close(d.done)
-	}
-
+	d.done()
 	return d.socket.Close()
 }
 
@@ -591,9 +586,10 @@ func New(cfg *Config) (*DHT, error) {
 	result.socket.SetHandler(result)
 
 	// Don't start any of the background routines until everything that could fail is done.
-	result.done = make(chan struct{})
-	go result.rotateSecrets()
-	go result.updateTick()
+	var ctx context.Context
+	ctx, result.done = context.WithCancel(context.Background())
+	go result.rotateSecrets(ctx)
+	go result.updateTick(ctx)
 
 	return result, nil
 }

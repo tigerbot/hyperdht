@@ -159,3 +159,26 @@ func dualIPTest(t *testing.T, f func(*testing.T, bool)) {
 	t.Run("ipv4", wrap(false))
 	t.Run("ipv6", wrap(true))
 }
+
+func TestOpenClose(t *testing.T) {
+	defer func() {
+		if err := recover(); err != nil {
+			t.Error("providing nil for config or double closing caused panic:", err)
+		}
+	}()
+
+	dht, err := New(nil)
+	if err != nil {
+		t.Fatal("providing nil for config errored:", err)
+	}
+
+	var wait sync.WaitGroup
+	defer wait.Wait()
+
+	wait.Add(1)
+	go func() {
+		defer wait.Done()
+		dht.Close()
+	}()
+	dht.Close()
+}
