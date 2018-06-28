@@ -60,12 +60,16 @@ func (e NodeEncoder) Decode(buf []byte) []Node {
 	}
 
 	result := make([]Node, len(buf)/totalSize)
+	var chunk []byte
 	for i := range result {
-		start := i * totalSize
-		node := BasicNode{MyID: make([]byte, e.IDSize)}
-		copy(node.MyID, buf[start:start+e.IDSize])
-		node.MyAddr = e.DecodeAddr(buf[start+e.IDSize : start+totalSize])
-		result[i] = node
+		chunk, buf = buf[:totalSize], buf[totalSize:]
+
+		idBuf := make([]byte, e.IDSize)
+		copy(idBuf, chunk)
+		result[i] = BasicNode{
+			MyID:   idBuf,
+			MyAddr: e.DecodeAddr(chunk[e.IDSize:]),
+		}
 	}
 
 	return result

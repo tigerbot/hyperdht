@@ -62,7 +62,9 @@ func (e IPv4Encoder) DecodeAddr(buf []byte) net.Addr {
 	if len(buf) != e.EncodedLen() {
 		return nil
 	}
-	return &net.UDPAddr{IP: net.IP(buf[:net.IPv4len]), Port: readPort(buf[net.IPv4len:])}
+	ip := make(net.IP, net.IPv4len)
+	copy(ip, buf)
+	return &net.UDPAddr{IP: ip, Port: readPort(buf[net.IPv4len:])}
 }
 
 // EncodedLen implements IPEncoder.EncodedLen and returns 6.
@@ -88,7 +90,9 @@ func (e IPv6Encoder) DecodeAddr(buf []byte) net.Addr {
 	if len(buf) != e.EncodedLen() {
 		return nil
 	}
-	return &net.UDPAddr{IP: net.IP(buf[:net.IPv6len]), Port: readPort(buf[net.IPv6len:])}
+	ip := make(net.IP, net.IPv6len)
+	copy(ip, buf)
+	return &net.UDPAddr{IP: ip, Port: readPort(buf[net.IPv6len:])}
 }
 
 // EncodedLen implements IPEncoder.EncodedLen and returns 18.
