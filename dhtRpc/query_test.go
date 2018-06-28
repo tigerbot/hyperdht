@@ -315,42 +315,30 @@ func TestQueryCancel(t *testing.T) {
 	}
 }
 
-func TestQueryError(t *testing.T) {
-	swarm := createSwarm(t, 10, false)
-	defer swarm.Close()
-
-	swarm.client.Close()
-	cfg := &Config{
-		BootStrap: []net.Addr{swarm.bootstrap.Addr()},
-		Socket:    swarm.network.NewNode(swarm.client.Addr(), true),
-		timeout:   5 * time.Millisecond,
-	}
-	if client, err := New(cfg); err != nil {
-		t.Fatal("failed to make new client with timeout:", err)
-	} else {
-		swarm.client = client
-	}
-
+func validateStreamErr(t *testing.T, stage string, err error) {
 	re := regexp.MustCompile(`no ([\w]+ )?nodes responded`)
 	type tmpTimeoutErr interface {
 		error
 		Temporary() bool
 		Timeout() bool
 	}
-	validateErr := func(stage string, err error) {
-		if err == nil {
-			t.Errorf("%s did not fail when no nodes should have responded", stage)
-			return
-		}
-		if !re.MatchString(err.Error()) {
-			t.Errorf("%s error message %q does not match %v", stage, err, re)
-		}
-		if tErr, ok := err.(tmpTimeoutErr); !ok {
-			t.Errorf("%s error missing Temporary or Timeout methods: %#v", stage, err)
-		} else if !tErr.Temporary() || !tErr.Timeout() {
-			t.Errorf("%s error did not return true for Temporary and Timeout", stage)
-		}
+
+	if err == nil {
+		t.Errorf("%s did not fail when no nodes should have responded", stage)
+		return
 	}
+	if !re.MatchString(err.Error()) {
+		t.Errorf("%s error message %q does not match %v", stage, err, re)
+	}
+	if tErr, ok := err.(tmpTimeoutErr); !ok {
+		t.Errorf("%s error missing Temporary or Timeout methods: %#v", stage, err)
+	} else if !tErr.Temporary() || !tErr.Timeout() {
+		t.Errorf("%s error did not return true for Temporary and Timeout", stage)
+	}
+}
+func TestUpdateError(t *testing.T) {
+	swarm := createSwarm(t, 10, false)
+	defer swarm.Close()
 
 	query := &Query{Command: "command", Target: swarm.servers[0].ID()}
 	ctx, done := context.WithTimeout(context.Background(), time.Second)
@@ -369,10 +357,18 @@ func TestQueryError(t *testing.T) {
 	} else if cnt = stream.ResponseCnt(); cnt == 0 {
 		t.Error("update stream had no responses, expected responses from query part")
 	}
-	validateErr("update", err)
+	validateStreamErr(t, "update", err)
 	if len(resp) != 0 {
 		t.Errorf("received %d responses from non-verbose update", len(resp))
 	}
+}
+func TestQueryError(t *testing.T) {
+	swarm := createSwarm(t, 10, false)
+	defer swarm.Close()
+
+	query := &Query{Command: "command", Target: swarm.servers[0].ID()}
+	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	defer done()
 
 	// Now make it so that none of the server will respond to a query request
 	for _, node := range swarm.servers {
@@ -381,13 +377,12 @@ func TestQueryError(t *testing.T) {
 		})
 	}
 
-	// Need to bootstrap so we don't count the response from the bootstrap node. The nodes we
-	// had before will have been removed because the update requests failed.
+	// Need to bootstrap so we don't count the response from the bootstrap node.
 	if err := swarm.client.Bootstrap(ctx); err != nil {
 		t.Fatal("failed to bootstrap node before query:", err)
 	}
 
-	stream = swarm.client.Query(ctx, query, nil)
+	stream := swarm.client.Query(ctx, query, nil)
 	var warnCnt int
 	for {
 		select {
@@ -400,7 +395,7 @@ func TestQueryError(t *testing.T) {
 				break
 			}
 			err := <-stream.ErrorChan()
-			validateErr("query", err)
+			validateStreamErr(t, "query", err)
 			if cnt := stream.ResponseCnt(); cnt != 0 {
 				t.Errorf("query stream has response count %d, expected 0", cnt)
 			}
