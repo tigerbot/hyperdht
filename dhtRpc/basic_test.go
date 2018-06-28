@@ -47,7 +47,9 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 	result := &dhtSwarm{network: fakeNetwork.New()}
 	modConfig := func(cfg *Config) *Config {
 		cp := *cfg
-		cp.Socket = result.network.NewNode(fakeNetwork.RandomAddress(ipv6), true)
+		// Only make the bootstrap node public
+		cp.Socket = result.network.NewNode(fakeNetwork.RandomAddress(ipv6), cp.BootStrap == nil)
+		cp.timeout = 15 * time.Millisecond
 		return &cp
 	}
 
@@ -70,10 +72,21 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 	}
 	ctx, done := context.WithTimeout(context.Background(), timeout)
 	defer done()
+
+	// 32 nodes bootstrapping at a time should be enough for any potential racey conditions to
+	// show themselves, and throttling it actually makes the race test run faster. It also helps
+	// with the holepunching part of the bootstrap process, though I'm not 100% sure why.
+	throttle := make(chan bool, 32)
+	for len(throttle) < cap(throttle) {
+		throttle <- true
+	}
 	var wait sync.WaitGroup
 	var failCnt int32
 	start := func(ind int, node *DHT) {
 		defer wait.Done()
+
+		<-throttle
+		defer func() { throttle <- true }()
 
 		if err := node.Bootstrap(ctx); err != nil {
 			if cnt := atomic.AddInt32(&failCnt, 1); cnt < 9 {
@@ -100,7 +113,7 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 	}
 	wait.Wait()
 	if failCnt > 0 {
-		t.Fatalf("failed to create/bootstrap %d of the server nodes", failCnt)
+		t.Fatalf("failed to create/bootstrap %d/%d of the server nodes", failCnt, size)
 	}
 
 	if result.client, err = New(modConfig(cfg)); err != nil {

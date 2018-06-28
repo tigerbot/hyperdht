@@ -100,6 +100,7 @@ func TestTargetedQuery(t *testing.T) { dualIPTest(t, targetedQueryTest) }
 func targetedQueryTest(t *testing.T, ipv6 bool) {
 	pair := createSwarm(t, 4, ipv6)
 	defer pair.Close()
+	pair.network.DisableNAT = true
 
 	for i, server := range pair.servers[1:] {
 		ind := i
@@ -135,6 +136,14 @@ func TestTargetedUpdate(t *testing.T) { dualIPTest(t, targetedUpdateTest) }
 func targetedUpdateTest(t *testing.T, ipv6 bool) {
 	pair := createSwarm(t, 4, ipv6)
 	defer pair.Close()
+
+	// We bootstrap the client both so it can get through the "NAT" and so it has stored nodes
+	// that it *could* use if we didn't manually specify the list.
+	ctx, done := context.WithTimeout(context.Background(), time.Second)
+	if err := pair.client.Bootstrap(ctx); err != nil {
+		t.Fatal("failed to bootstrap client:", err)
+	}
+	done()
 
 	for i, server := range pair.servers[1:] {
 		ind := i
@@ -233,6 +242,7 @@ func TestNonEphemeralBootstrap(t *testing.T) { dualIPTest(t, nonEphemeralBootstr
 func nonEphemeralBootstrapTest(t *testing.T, ipv6 bool) {
 	swarm := createSwarm(t, 32, ipv6)
 	defer swarm.Close()
+	swarm.network.DisableNAT = true
 
 	if nodes := swarm.client.Nodes(); len(nodes) > 0 {
 		t.Fatalf("client has already been bootstrapped:\n\t%#v", nodes)

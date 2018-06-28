@@ -10,6 +10,10 @@ import (
 // FakeNetwork emulates a UDP network where some nodes can be behind a NAT and not accessible
 // to addresses the node has not previously attempted to contact.
 type FakeNetwork struct {
+	// Forcefully makes all nodes in the network public. Useful if a single tests needs a
+	// public network, but a convenience function used for other tests makes nodes private.
+	DisableNAT bool
+
 	ctx   context.Context
 	done  context.CancelFunc
 	lock  sync.RWMutex
@@ -59,10 +63,10 @@ func (n *FakeNetwork) getNode(remote, local string) *FakeNode {
 
 	node.lock.RLock()
 	defer node.lock.RUnlock()
-	if !node.public && !node.tunneled[local] {
-		return nil
+	if n.DisableNAT || node.public || node.tunneled[local] {
+		return node
 	}
-	return node
+	return nil
 }
 func (n *FakeNetwork) rmNode(node *FakeNode) {
 	n.lock.Lock()
