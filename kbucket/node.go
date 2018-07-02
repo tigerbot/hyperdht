@@ -97,5 +97,4 @@ func splitNode(node *bucketNode, localID []byte) {
 	} else {
 		node.left.dontSplit = true
 	}
-
 }

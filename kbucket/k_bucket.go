@@ -1,5 +1,9 @@
-// Package kbucket implements a Kademlia DHT K-Bucket.
-// Implementation based on https://github.com/tristanls/k-bucket.
+// Package kbucket implements a Kademlia DHT K-Bucket using a binary tree.
+// It is intended to be as minimal as possible and makes as few assumptions as possible about
+// what is being stored. It also makes no assumptions about how an ID is generated or how long
+// it must be, and allows for contacts whose ID length differs from that of the bucket.
+//
+// Implementation is based on https://github.com/tristanls/k-bucket.
 package kbucket
 
 import (

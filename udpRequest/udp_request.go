@@ -1,5 +1,14 @@
-// Package udpRequest allows for making requests/responses over UDP.
-// It is the go implementation of the previous node library udp-request by mafintosh.
+// Package udpRequest allows requests and responses over a net.PacketConn.
+// Each message that is sent is prepended with a short header that indicates whether
+// a packet is a request or a response as well as an ID to match responses to their
+// cooresponding request.
+//
+// In addition to normal requests and responses, udpRequest also allows forwarding
+// requests using the same header that was received and forwarding responses to
+// hosts other than the one the request was received from. The logic for when this
+// would be appropriate/necessary however does not exist in this layer.
+//
+// Implementation is based on https://github.com/mafintosh/udp-request.
 package udpRequest
 
 import (
@@ -34,10 +43,10 @@ type Handler interface {
 	HandleUDPRequest(*PeerRequest, []byte)
 }
 
-// HandlerFunc is an adapter to allow the use of oridnary functions as UDP handlers.
+// HandlerFunc is an adapter to allow the use of ordinary functions as UDP handlers.
 type HandlerFunc func(*PeerRequest, []byte)
 
-// HandleUDPRequest call h
+// HandleUDPRequest calls f
 func (f HandlerFunc) HandleUDPRequest(p *PeerRequest, b []byte) { f(p, b) }
 
 // Config contains all of the options available for a UDP instance
@@ -91,7 +100,7 @@ type UDPRequest struct {
 	handler Handler
 }
 
-// Addr returns the local address that the PacketConn is attached to.
+// Addr returns the local address of the net.PacketConn being used.
 func (u *UDPRequest) Addr() net.Addr {
 	return u.socket.LocalAddr()
 }
@@ -272,12 +281,17 @@ func (u *UDPRequest) Respond(peer *PeerRequest, res []byte) error {
 	return u.sendMessage(peer.id, res, peer.Addr)
 }
 
-// ForwardRequest sends a request to a peer using the request ID of a request from a different peer.
+// ForwardRequest sends a request to a peer using the same header information that was used in
+// the request we received. If the request body informs the new recipient of where the original
+// request came from it can then use ForwardResponse to send a response directly to where it
+// originated.
 func (u *UDPRequest) ForwardRequest(from *PeerRequest, to net.Addr, msg []byte) error {
 	return u.sendMessage(from.id|requestMarker, msg, to)
 }
 
-// ForwardResponse sends a response to a peer using the response ID of a response from a different peer.
+// ForwardResponse sends a response to a peer other than the one we received the request from
+// using the same header information that we would have otherwise used. It is intended to be
+// used to respond to requests that have been forwarded using ForwardRequest.
 func (u *UDPRequest) ForwardResponse(from *PeerRequest, to net.Addr, msg []byte) error {
 	return u.sendMessage(from.id, msg, to)
 }

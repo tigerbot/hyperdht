@@ -1,4 +1,4 @@
-// Package hyperdht provided a DHT that supports peer discovery and distibuted hole punching.
+// Package hyperdht provides a DHT that supports peer discovery and distibuted hole punching.
 package hyperdht
 
 import (

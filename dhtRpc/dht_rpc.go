@@ -1,5 +1,6 @@
 // Package dhtRpc makes calls over a Kademlia based DHT.
-// It is the go implementation of the `dht-rpc` node library by mafintosh.
+//
+// Implementation is based on https://github.com/mafintosh/dht-rpc
 package dhtRpc
 
 import (

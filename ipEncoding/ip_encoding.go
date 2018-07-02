@@ -1,4 +1,6 @@
 // Package ipEncoding converts between IP addresses (with ports) and binary buffers.
+// It also handles encoding/decoding "nodes", which are just IDs associated with an
+// IP address.
 package ipEncoding
 
 import (
