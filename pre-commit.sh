@@ -38,7 +38,7 @@ if [ -n "${CHANGED_GO}" ]; then
   new_stash=$(git rev-parse -q --verify refs/stash)
 
   # find any of the staged files that differ from what gofmt produces
-  UNFORMATTED=$(gofmt -l ${CHANGED_GO}) || FAILED='true'
+  UNFORMATTED=$(gofmt -s -l ${CHANGED_GO}) || FAILED='true'
 
   # http://stackoverflow.com/questions/20479794/how-do-i-properly-git-stash-pop-in-pre-commit-hooks-to-get-a-clean-working-tree
   # see above link for explaination of the check on stash states and the reset
@@ -48,7 +48,7 @@ if [ -n "${CHANGED_GO}" ]; then
   fi
 
   # go ahead and format everything now that we don't have a stash to conflict with
-  gofmt -w ${CHANGED_GO}
+  gofmt -s -w ${CHANGED_GO}
 fi
 
 if [ -n "${FAILED}" ]; then

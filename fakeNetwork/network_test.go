@@ -181,7 +181,7 @@ func TestAccess(t *testing.T) {
 	go read(node2)
 
 	if _, err := node1.WriteTo([]byte(badMsg), RandomAddress(false)); err != nil {
-		t.Error("WriteTo errored sending to non-existant address:", err)
+		t.Error("WriteTo errored sending to non-existent address:", err)
 	}
 
 	if _, err := node1.WriteTo([]byte(badMsg), addr2); err != nil {

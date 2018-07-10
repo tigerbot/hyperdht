@@ -255,7 +255,7 @@ func TestQueryCancel(t *testing.T) {
 		t.Errorf("lookup returned before context finished")
 	}
 
-	// There will often be a slight delay between when the error channel is writen to and the
+	// There will often be a slight delay between when the error channel is written to and the
 	// response channel chain is fully closed, so we sleep to allow that to happen.
 	time.Sleep(time.Millisecond)
 	if resp, ok := <-stream.ResponseChan(); ok {

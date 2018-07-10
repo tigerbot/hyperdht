@@ -86,7 +86,7 @@ func TestGet(t *testing.T) {
 	bucket := New(nil)
 
 	if c := bucket.Get([]byte("foo")); c != nil {
-		t.Errorf("get on non-existant ID returned non-nil contact %v", c)
+		t.Errorf("get on non-existent ID returned non-nil contact %v", c)
 	}
 
 	a := &testContact{'a'}
@@ -105,9 +105,9 @@ func TestRemove(t *testing.T) {
 	}
 
 	if r := bucket.Remove([]byte{'b'}); r != nil {
-		t.Errorf("did not return nil removing non-existant contact")
+		t.Errorf("did not return nil removing non-existent contact")
 	} else if len(bucket.root.contacts) != 1 {
-		t.Fatalf("removing non-existant contact changed stored contacts")
+		t.Fatalf("removing non-existent contact changed stored contacts")
 	}
 
 	bucket.Remove([]byte{'a'})
@@ -235,7 +235,7 @@ func TestLargeBucket(t *testing.T) {
 	}
 
 	if c := bucket.Get([]byte{0x5f, 0x00}); c != nil {
-		t.Errorf("got contact %#v using non-existant ID, expected nil", c)
+		t.Errorf("got contact %#v using non-existent ID, expected nil", c)
 	}
 	if c := bucket.Get([]byte{0x40, 0x03}); c == nil {
 		t.Errorf("got nil contact using ID that should have existed")

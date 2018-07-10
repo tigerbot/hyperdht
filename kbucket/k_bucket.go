@@ -157,7 +157,7 @@ func (b *KBucket) add(c Contact) {
 
 	// If the bucket is full and we are not allowed to split it we need to ping the
 	// first `pingCnt` contacts to determine if they are alive. Only if one of the
-	// pinged nodes doesn't repsond can we add the new contact.
+	// pinged nodes doesn't respond can we add the new contact.
 	if node.dontSplit {
 		if b.onPing != nil {
 			cp := make([]Contact, b.pingCnt)

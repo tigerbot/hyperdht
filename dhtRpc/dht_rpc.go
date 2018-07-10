@@ -98,9 +98,7 @@ func (d *DHT) Nodes() []Node {
 	stored := d.nodes.Contacts()
 	result := make([]Node, 0, len(stored))
 	for _, c := range stored {
-		if n, ok := c.(Node); !ok {
-			d.nodes.Remove(c.ID())
-		} else {
+		if n, ok := c.(Node); ok {
 			result = append(result, n)
 		}
 	}
@@ -385,8 +383,7 @@ func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
 		return
 	}
 	if req.ForwardResponse != nil {
-		p = d.forwardResponse(p, req)
-		if p == nil {
+		if p = d.forwardResponse(p, req); p == nil {
 			return
 		}
 	}
@@ -505,7 +502,7 @@ func (d *DHT) Bootstrap(ctx context.Context) error {
 	// Bootstrapping is lower priority than most other queries, so if there are other queries
 	// active then we lower the number of requests our query can make at a time to avoid hogging
 	// the total number of requests that can be pending.
-	for _ = range stream.respChan {
+	for range stream.respChan {
 		if atomic.LoadInt32(&d.inflightQueries) == 1 {
 			atomic.StoreInt32(&stream.concurrency, fgCon)
 		} else {

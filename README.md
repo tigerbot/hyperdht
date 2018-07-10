@@ -1,6 +1,7 @@
 # hyperdht
 
 [![GoDoc](https://godoc.org/gitlab.daplie.com/core-sdk/hyperdht?status.svg)](https://godoc.org/gitlab.daplie.com/core-sdk/hyperdht)
+[![Go Report Card](https://goreportcard.com/badge/gitlab.daplie.com/core-sdk/hyperdht)](https://goreportcard.com/report/gitlab.daplie.com/core-sdk/hyperdht)
 [![Build Status](https://gitlab.daplie.com/core-sdk/hyperdht/badges/master/build.svg)](https://gitlab.daplie.com/core-sdk/hyperdht/commits/master)
 [![Coverage Report](https://gitlab.daplie.com/core-sdk/hyperdht/badges/master/coverage.svg)](https://gitlab.daplie.com/core-sdk/hyperdht/commits/master)
 
