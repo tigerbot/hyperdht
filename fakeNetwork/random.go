@@ -15,6 +15,7 @@ func RandomAddress(ipv6 bool) net.Addr {
 		addr.IP = make(net.IP, 4)
 	}
 	// According to https://golang.org/pkg/math/rand/#Read this always returns a nil error.
+	// #nosec (this is a test util, so pseudo random is not only fine, it's preferable)
 	rand.Read(addr.IP)
 	addr.Port = 1024 + rand.Intn(1<<16-1024)
 

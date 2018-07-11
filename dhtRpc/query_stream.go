@@ -41,17 +41,17 @@ type QueryStream struct {
 	dht   *DHT
 	query *Query
 
-	concurrency int32
 	respCnt     int
 	commitCnt   int
+	concurrency int32
 	isUpdate    bool
 	verbose     bool
 
+	moveCloser bool
+	holepunch  bool
 	bootstrap  map[string]*queryNode
 	pending    queryNodeList
 	closest    queryNodeList
-	moveCloser bool
-	holepunch  bool
 
 	respChan chan QueryResponse
 	errChan  chan error
@@ -122,7 +122,9 @@ func (s *QueryStream) runStream() {
 
 	var inflight int32
 	send := func(node *queryNode) {
-		s.send(node, committing)
+		if res, err := s.makeRequest(node, committing); err == nil {
+			s.handleResponse(node, committing, res)
+		}
 		atomic.AddInt32(&inflight, -1)
 		cond.Broadcast()
 	}
@@ -139,7 +141,7 @@ func (s *QueryStream) runStream() {
 			return
 		}
 
-		if node := list.getUnqueried(); node != nil {
+		if node := list.getNotQueried(); node != nil {
 			node.queried = true
 			go send(node)
 			atomic.AddInt32(&inflight, 1)
@@ -154,7 +156,7 @@ func (s *QueryStream) runStream() {
 	}
 }
 
-func (s *QueryStream) send(node *queryNode, isUpdate bool) {
+func (s *QueryStream) makeRequest(node *queryNode, isUpdate bool) (*response, error) {
 	req := &request{
 		Command: &s.query.Command,
 		Id:      s.dht.queryID,
@@ -165,17 +167,14 @@ func (s *QueryStream) send(node *queryNode, isUpdate bool) {
 		req.RoundtripToken = node.roundTripToken
 	}
 
-	res, err := s.dht.request(s.ctx, node.addr, req)
-	if s.holepunch && err != nil && node.referrer != nil {
+	res, err := s.dht.makeRequest(s.ctx, node.addr, req)
+	if s.holepunch && node.referrer != nil && err != nil && s.ctx.Err() == nil {
 		if err = s.dht.Holepunch(s.ctx, node.addr, node.referrer); err == nil {
-			res, err = s.dht.request(s.ctx, node.addr, req)
+			res, err = s.dht.makeRequest(s.ctx, node.addr, req)
 		}
 	}
 
-	if s.ctx.Err() != nil {
-		return
-	}
-	if err != nil {
+	if err != nil && s.ctx.Err() == nil {
 		// The node we were trying to reach might not have been in our list, but if it was it's
 		// a bad node and we don't want it in our list anymore.
 		if node.id != nil {
@@ -186,10 +185,11 @@ func (s *QueryStream) send(node *queryNode, isUpdate bool) {
 		case s.warnChan <- err:
 		default:
 		}
-
-		return
 	}
 
+	return res, err
+}
+func (s *QueryStream) handleResponse(node *queryNode, isUpdate bool, res *response) {
 	s.lock.Lock()
 	s.respCnt++
 	if isUpdate {

@@ -47,10 +47,10 @@ type QueryHandler func(Node, *Query) ([]byte, error)
 type Config struct {
 	ID          []byte     // ID of the node. If nil, one will be randomly generated
 	Ephemeral   bool       // Will this node be stored by other nodes?
+	IPv6        bool       // Will the node use IPv6 encoding instead of IPv4. Incompatible with nodes using IPv4 encoding.
 	Concurrency int        // How many requests can be pending at a time
 	BootStrap   []net.Addr // Bootstrap node addresses
 	Nodes       []Node     // Initial node list
-	IPv6        bool       // Will the node use IPv6 encoding instead of IPv4. Incompatible with nodes using IPv4 encoding.
 
 	// Allows for custom socket types or instances to be used. If Socket is nil a new net.UDPConn
 	// is created that will listen on the specified port.
@@ -153,17 +153,17 @@ func (d *DHT) check(n *storedNode) bool {
 	return true
 }
 
-func (d *DHT) makeToken(peer net.Addr, cmd string) []byte {
+func (d *DHT) makeToken(peer, cmd string) []byte {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
 
 	h := sha256.New()
 	h.Write(d.secrets[0])
-	h.Write([]byte(peer.String()))
+	h.Write([]byte(peer))
 	h.Write([]byte(cmd))
 	return h.Sum(nil)
 }
-func (d *DHT) validToken(peer net.Addr, cmd string, token []byte) bool {
+func (d *DHT) validToken(peer, cmd string, token []byte) bool {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
 
@@ -174,7 +174,7 @@ func (d *DHT) validToken(peer net.Addr, cmd string, token []byte) bool {
 	for _, s := range d.secrets {
 		h.Reset()
 		h.Write(s)
-		h.Write([]byte(peer.String()))
+		h.Write([]byte(peer))
 		h.Write([]byte(cmd))
 		if bytes.Equal(h.Sum(nil), token) {
 			return true
@@ -344,13 +344,13 @@ func (d *DHT) createResponse(peer net.Addr, req *request) *response {
 	cmd := req.GetCommand()
 	res := &response{
 		Nodes:          d.encoder.Encode(d.closest(req.Target, 20)),
-		RoundtripToken: d.makeToken(peer, cmd),
+		RoundtripToken: d.makeToken(peer.String(), cmd),
 	}
 
 	// A valid round trip token constitutes a update.
 	// I'm not sure what added benefit/security is added by having this token system, but the
 	// nodejs implementation uses it and we are trying to stay compatible with it.
-	handler := d.getHandler(cmd, d.validToken(peer, cmd, req.RoundtripToken))
+	handler := d.getHandler(cmd, d.validToken(peer.String(), cmd, req.RoundtripToken))
 	if handler == nil {
 		return res
 	}
@@ -390,9 +390,9 @@ func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
 
 	var res *response
 	switch req.GetCommand() {
-	case "_ping":
+	case pingCmd:
 		res = &response{Value: d.encoder.EncodeAddr(p.Addr)}
-	case "_find_node":
+	case findNodeCmd:
 		if len(req.Target) == IDSize {
 			res = &response{Nodes: d.encoder.Encode(d.closest(req.Target, 20))}
 		}
@@ -408,7 +408,7 @@ func (d *DHT) HandleUDPRequest(p *udpRequest.PeerRequest, reqBuf []byte) {
 	}
 }
 
-func (d *DHT) request(ctx context.Context, peer net.Addr, req *request) (*response, error) {
+func (d *DHT) makeRequest(ctx context.Context, peer net.Addr, req *request) (*response, error) {
 	reqBuf, err := proto.Marshal(req)
 	if err != nil {
 		return nil, errors.WithMessage(err, "encoding request")
@@ -437,7 +437,7 @@ func (d *DHT) request(ctx context.Context, peer net.Addr, req *request) (*respon
 // Ping sends a special query that always responds with our address as the peer saw it.
 func (d *DHT) Ping(ctx context.Context, peer net.Addr) (net.Addr, error) {
 	cmd := pingCmd
-	res, err := d.request(ctx, peer, &request{Command: &cmd, Id: d.queryID})
+	res, err := d.makeRequest(ctx, peer, &request{Command: &cmd, Id: d.queryID})
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +458,7 @@ func (d *DHT) Holepunch(ctx context.Context, peer, referrer net.Addr) error {
 	if req.ForwardRequest == nil {
 		return errors.Errorf("invalid peer address %s", peer)
 	}
-	_, err := d.request(ctx, referrer, req)
+	_, err := d.makeRequest(ctx, referrer, req)
 	return err
 }
 
@@ -498,7 +498,7 @@ func (d *DHT) Bootstrap(ctx context.Context) error {
 		opts = &QueryOpts{Concurrency: int(bgCon)}
 	}
 
-	stream := d.Query(ctx, &Query{Command: "_find_node", Target: d.id[:]}, opts)
+	stream := d.Query(ctx, &Query{Command: findNodeCmd, Target: d.id[:]}, opts)
 	// Bootstrapping is lower priority than most other queries, so if there are other queries
 	// active then we lower the number of requests our query can make at a time to avoid hogging
 	// the total number of requests that can be pending.

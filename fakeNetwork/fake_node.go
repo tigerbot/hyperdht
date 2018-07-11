@@ -75,7 +75,7 @@ func (n *FakeNode) WriteTo(b []byte, addr net.Addr) (int, error) {
 		}
 	}
 
-	// We are simulating a UDP network with no acknowlegement, so never return error
+	// We are simulating a UDP network with no acknowledgement, so never return error
 	return len(b), nil
 }
 

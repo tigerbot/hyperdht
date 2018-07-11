@@ -33,7 +33,7 @@ type storedNode struct {
 }
 
 // storedNodeList maintains a linked list and a KBucket in parallel. The KBucket storage is
-// to gain the efficiencies of Kademlia DHTs, while the linked list allows us to keep track
+// to gain the efficiencies of a Kademlia DHT, while the linked list allows us to keep track
 // of which nodes are the oldest regardless of their ID.
 type storedNodeList struct {
 	lock sync.Mutex
@@ -150,7 +150,7 @@ func (l *queryNodeList) get(id []byte) *queryNode {
 	return nil
 }
 
-func (l *queryNodeList) getUnqueried() *queryNode {
+func (l *queryNodeList) getNotQueried() *queryNode {
 	for _, n := range l.list {
 		if !n.queried {
 			return n

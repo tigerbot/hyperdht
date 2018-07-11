@@ -17,11 +17,11 @@ func TestDHTRateLimit(t *testing.T) {
 		})
 	}
 
-	const parellel = 4
+	const parallel = 4
 	ctx, done := context.WithTimeout(context.Background(), stdTimeout)
 	defer done()
 	streamFinished := make(chan bool)
-	for i := 0; i < parellel; i++ {
+	for i := 0; i < parallel; i++ {
 		query := Query{
 			Command: "hello",
 			Target:  swarm.servers[i].ID(),
@@ -41,7 +41,7 @@ func TestDHTRateLimit(t *testing.T) {
 	for {
 		select {
 		case <-streamFinished:
-			if finished++; finished >= parellel {
+			if finished++; finished >= parallel {
 				t.Log(counts)
 				return
 			}

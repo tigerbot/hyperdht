@@ -121,7 +121,7 @@ func (s *store) Iterator(key string) func() *peerInfo {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	// Technically there is a slightly racey condition here because we will release the lock
+	// Technically there is a slightly racy condition here because we will release the lock
 	// after making the list, but the values pointed to in the list can change. This isn't
 	// a big enough deal for me to worry about until the race detector starts failing and
 	// preventing us from detecting more serious race conditions.

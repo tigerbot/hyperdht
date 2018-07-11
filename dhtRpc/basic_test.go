@@ -85,7 +85,7 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 		}
 	}
 
-	// 16 nodes bootstrapping at a time should be enough for any potential racey conditions to
+	// 16 nodes bootstrapping at a time should be enough for any potential racy conditions to
 	// show themselves, and throttling it actually makes the race test run faster. It also helps
 	// reduce the timing inconsistencies introduced when we put the bootstrap node under such a
 	// heavy load (it's responsible for helping everyone holepunch to almost anyone else).
@@ -99,26 +99,8 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 
 		<-throttle
 		defer func() { throttle <- true }()
-
-		err := errors.New("no bootstrap attempted")
-		var messages []string
-		for tries := 0; tries < 8 && err != nil; tries++ {
-			// Unless the size of our swarm is one, we want more from our bootstrap than simply not
-			// erroring. We also want to have other nodes stored in our list. Otherwise we can't be
-			// sure that we're actually able to communicate with any other nodes through the "NAT".
-			err = node.Bootstrap(ctx)
-			if err == nil && size > 1 && len(node.Nodes()) == 0 {
-				err = errors.New("no nodes acquired in list")
-			}
-
-			if err != nil {
-				messages = append(messages, err.Error())
-				time.Sleep(time.Duration(2*tries+1) * swarmBootstrapTimeout / 1000)
-			}
-		}
-
-		if err != nil {
-			logErr("bootstrap", ind, errors.New(strings.Join(messages, "; ")))
+		if err := bootstrapNode(ctx, node, size > 1); err != nil {
+			logErr("bootstrapping", ind, err)
 		}
 	}
 
@@ -142,6 +124,26 @@ func createSwarm(t *testing.T, size int, ipv6 bool) *dhtSwarm {
 	}
 
 	return result
+}
+func bootstrapNode(ctx context.Context, node *DHT, requireNonempty bool) error {
+	var messages []string
+	for tries := 0; tries < 8; tries++ {
+		// Unless the size of our swarm is one, we want more from our bootstrap than simply not
+		// erroring. We also want to have other nodes stored in our list. Otherwise we can't be
+		// sure that we're actually able to communicate with any other nodes through the "NAT".
+		err := node.Bootstrap(ctx)
+		if err == nil && requireNonempty && len(node.Nodes()) == 0 {
+			err = errors.New("no nodes acquired in list")
+		}
+
+		if err == nil {
+			return nil
+		}
+		messages = append(messages, err.Error())
+		time.Sleep(time.Duration(2*tries+1) * swarmBootstrapTimeout / 1000)
+	}
+
+	return errors.New(strings.Join(messages, "; "))
 }
 
 func createDHTNode(t *testing.T, network *fakeNetwork.FakeNetwork, ipv6, public bool) *DHT {

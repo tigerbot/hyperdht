@@ -24,7 +24,7 @@ func TestQueryNodeListOrder(t *testing.T) {
 
 	expected := []byte{0x55, 0x54, 0x57, 0x56, 0x51}
 	for i, b := range expected {
-		n := l.getUnqueried()
+		n := l.getNotQueried()
 		if n == nil {
 			t.Fatalf("got nil node for query %d", i)
 		}
@@ -34,7 +34,7 @@ func TestQueryNodeListOrder(t *testing.T) {
 			t.Errorf("got ID %x for query %d, expected %x", n.id, i, b)
 		}
 	}
-	if n := l.getUnqueried(); n != nil {
+	if n := l.getNotQueried(); n != nil {
 		t.Errorf("got unexpected node %#v", n)
 	}
 }

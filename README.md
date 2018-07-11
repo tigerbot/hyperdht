@@ -33,7 +33,7 @@ Implementation is based on [tristanls's `k-bucket` written for nodejs](https://g
 Package udpRequest allows requests and responses over a net.PacketConn.
 Each message that is sent is prepended with a short header that indicates whether
 a packet is a request or a response as well as an ID to match responses to their
-cooresponding request.
+corresponding request.
 
 In addition to normal requests and responses, udpRequest also allows forwarding
 requests using the same header that was received and forwarding responses to

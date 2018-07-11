@@ -72,9 +72,9 @@ func announce(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT,
 	unrun := func() {
 		// Our main context is already finished, but we still want to unannounce so we create
 		// a new context that has a limited lifetime.
-		ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+		freshCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
 		defer done()
-		if err := dht.Unannounce(ctx, key, nil); err != nil {
+		if err := dht.Unannounce(freshCtx, key, nil); err != nil {
 			log.Printf("encountered error unannouncing %x: %v\n", key, err)
 		} else if !quiet {
 			log.Printf("unannounced %x\n", key)

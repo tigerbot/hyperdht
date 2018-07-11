@@ -92,10 +92,10 @@ func (e timeoutErr) Temporary() bool { return true }
 type UDPRequest struct {
 	socket net.PacketConn
 	tick   uint32
+	retry  bool
 
 	lock    sync.RWMutex
 	pending map[int]*pendingRequest
-	retry   bool
 
 	handler Handler
 }
@@ -154,6 +154,7 @@ func (u *UDPRequest) checkTimeouts(timeout time.Duration) {
 			} else if p.retryCnt < len(retries) {
 				p.timeout = retries[p.retryCnt]
 				p.retryCnt++
+				// #nosec (UDP isn't likely to error and couldn't do anything about it anyway)
 				u.socket.WriteTo(p.sendBuf, p.addr)
 			} else {
 				// We don't want to hit this condition again for this request even if the timeout is

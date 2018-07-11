@@ -35,8 +35,9 @@ func extractHostPort(peer net.Addr) (net.IP, int) {
 	} else if tcp, ok := peer.(*net.TCPAddr); ok {
 		return tcp.IP, tcp.Port
 	} else if hostStr, portStr, err := net.SplitHostPort(peer.String()); err == nil {
-		port64, _ := strconv.ParseInt(portStr, 10, 32)
-		return net.ParseIP(hostStr), int(port64)
+		if port64, err := strconv.ParseInt(portStr, 10, 32); err == nil {
+			return net.ParseIP(hostStr), int(port64)
+		}
 	}
 	return nil, 0
 }

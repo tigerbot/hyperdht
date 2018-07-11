@@ -201,7 +201,7 @@ func TestCount(t *testing.T) {
 	}
 	bucket.Add(a)
 	if cnt := bucket.Count(); cnt != 1 {
-		t.Fatalf("bucket after re-add has count %d, exptected 1", cnt)
+		t.Fatalf("bucket after re-add has count %d, expected 1", cnt)
 	}
 
 	bucket.Add(&testContact{'a'})
@@ -213,7 +213,7 @@ func TestCount(t *testing.T) {
 	bucket.Add(&testContact{'e'})
 	bucket.Add(&testContact{'f'})
 	if cnt := bucket.Count(); cnt != 6 {
-		t.Fatalf("bucket after multi-add has count %d, exptected 1", cnt)
+		t.Fatalf("bucket after multi-add has count %d, expected 1", cnt)
 	}
 }
 
