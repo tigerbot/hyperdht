@@ -34,7 +34,10 @@ const (
 	secretCnt      = 2
 	secretSize     = 32
 	secretLifetime = 5 * time.Minute
-	tickInterval   = 5 * time.Second
+
+	tickInterval     = 5 * time.Second
+	oldPingThresh    = uint64(2*time.Minute/tickInterval) + 1
+	bucketPingThresh = uint64(30*time.Second/tickInterval) + 1
 
 	pingCmd     = "_ping"
 	findNodeCmd = "_find_node"
@@ -138,7 +141,7 @@ func (d *DHT) pingSome(curTick uint64) {
 	}
 
 	for _, n := range d.nodes.oldest(count) {
-		if curTick-atomic.LoadUint64(&n.tick) >= 3 {
+		if curTick-n.tick >= oldPingThresh {
 			go d.check(n)
 		}
 	}
@@ -261,8 +264,9 @@ func (d *DHT) onNodePing(current []kbucket.Contact, replacement kbucket.Contact)
 			d.nodes.Remove(c.ID())
 			d.nodes.Add(replacement)
 			return
-		} else if curTick-node.tick >= 3 {
-			// More than 10 seconds since we pinged this node, so make sure it's still active
+		} else if curTick-node.tick >= bucketPingThresh {
+			// This node is older than the threshold for re-pinging triggered by the k-bucket,
+			// so make sure it's still active
 			reping = append(reping, node)
 		}
 	}
@@ -281,18 +285,7 @@ func (d *DHT) onNodePing(current []kbucket.Contact, replacement kbucket.Contact)
 // specific handler added. Only one handler may be added for a particular event at a time, so
 // adding a nil handler will effectively disable the previous handler.
 func (d *DHT) OnQuery(command string, handler QueryHandler) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-
-	key := "query"
-	if command != "" {
-		key += ":" + command
-	}
-	if handler != nil {
-		d.handlers[key] = handler
-	} else {
-		delete(d.handlers, key)
-	}
+	d.setHandler(command, false, handler)
 }
 
 // OnUpdate registers handlers for incoming updates. If the command string is the zero-value then
@@ -300,10 +293,20 @@ func (d *DHT) OnQuery(command string, handler QueryHandler) {
 // specific handler added. Only one handler may be added for a particular event at a time, so
 // adding a nil handler will effectively disable the previous handler.
 func (d *DHT) OnUpdate(command string, handler QueryHandler) {
+	d.setHandler(command, true, handler)
+}
+
+func (d *DHT) setHandler(command string, isUpdate bool, handler QueryHandler) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
-	key := "update"
+	var key string
+	if isUpdate {
+		key = "update"
+	} else {
+		key = "query"
+	}
+
 	if command != "" {
 		key += ":" + command
 	}
@@ -313,11 +316,8 @@ func (d *DHT) OnUpdate(command string, handler QueryHandler) {
 		delete(d.handlers, key)
 	}
 }
-
 func (d *DHT) getHandler(cmd string, isUpdate bool) QueryHandler {
 	var method string
-	// I'm not sure what added benefit/security is added by having this token system, but the
-	// nodejs implementation uses it and we are trying to stay compatible with it.
 	if isUpdate {
 		method = "update"
 	} else {
