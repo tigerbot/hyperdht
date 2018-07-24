@@ -1,117 +1,23 @@
+// Hyperdht provides a command line interface to interact with a hyperdht network. It can be
+// used to create bootstrap nodes, announce on the network, or query on the network.
 package main
 
 import (
 	"context"
 	"encoding/hex"
 	"log"
-	"math/rand"
-	"os"
-	"os/signal"
 	"sync"
-	"time"
 
 	"github.com/spf13/pflag"
 
 	"gitlab.daplie.com/core-sdk/hyperdht"
+	"gitlab.daplie.com/core-sdk/hyperdht/cmd/internal/cmdUtils"
 	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
 )
 
 var quiet bool
 
 type handler func(context.Context, *sync.WaitGroup, *hyperdht.HyperDHT, []byte)
-
-func interruptCtx() context.Context {
-	ctx, done := context.WithCancel(context.Background())
-	sigChan := make(chan os.Signal)
-	signal.Notify(sigChan, os.Interrupt)
-
-	go func() {
-		<-sigChan
-		log.Println("interrupt detected, shutting down (interrupt again to force close)")
-		done()
-		signal.Stop(sigChan)
-	}()
-
-	return ctx
-}
-func randDuration() time.Duration {
-	part := time.Duration(rand.Int63n(int64(time.Minute)))
-	return 4*time.Minute + part
-}
-
-func normal(ctx context.Context, dht *hyperdht.HyperDHT) {
-	for {
-		if err := dht.Bootstrap(ctx); err != nil {
-			log.Println("encountered error bootstrapping:", err)
-		} else if !quiet {
-			log.Println("bootstrapped...")
-		}
-
-		timer := time.NewTimer(randDuration())
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-		}
-	}
-}
-func announce(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT, key []byte) {
-	if wait != nil {
-		defer wait.Done()
-	}
-	timer := time.NewTimer(randDuration())
-	defer timer.Stop()
-
-	run := func() {
-		if err := dht.AnnounceDiscard(ctx, key, nil); err != nil {
-			log.Printf("encountered error announcing %x: %v\n", key, err)
-		} else if !quiet {
-			log.Printf("announced %x...\n", key)
-		}
-	}
-	unrun := func() {
-		// Our main context is already finished, but we still want to unannounce so we create
-		// a new context that has a limited lifetime.
-		freshCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
-		defer done()
-		if err := dht.Unannounce(freshCtx, key, nil); err != nil {
-			log.Printf("encountered error unannouncing %x: %v\n", key, err)
-		} else if !quiet {
-			log.Printf("unannounced %x\n", key)
-		}
-	}
-
-	run()
-	defer unrun()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-
-		case <-timer.C:
-			run()
-			timer.Reset(randDuration())
-		}
-	}
-}
-func query(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT, key []byte) {
-	if wait != nil {
-		defer wait.Done()
-	}
-
-	stream := dht.Lookup(ctx, key, nil)
-	var respCnt int
-	for resp := range stream.ResponseChan() {
-		log.Printf("%x from %s\n", key, resp.Node)
-		log.Printf("\t%v\n", resp.Peers)
-		respCnt++
-	}
-	if err := <-stream.ErrorChan(); err != nil {
-		log.Printf("error querying for %x: %v\n", key, err)
-	} else if respCnt == 0 {
-		log.Printf("received no responses querying for %x\n", key)
-	}
-}
 
 func iterateKeys(ctx context.Context, dht *hyperdht.HyperDHT, args []string, f handler) {
 	keyList := make([][]byte, 0, len(args))
@@ -142,7 +48,7 @@ func main() {
 	pflag.VarP(&cfg, "config", "c", "the location of the config file to read")
 	pflag.IntVarP(&cfg.Port, "port", "p", 0, "the port to listen on")
 	pflag.BoolVar(&cfg.Ephemeral, "ephemeral", false, "don't inform other peers of our ID")
-	pflag.StringSliceVarP(&cfg.BootStrap, "bootstrap", "b", nil, "the list of servers to contact initially")
+	pflag.StringSliceVarP(&cfg.Bootstrap, "bootstrap", "b", nil, "the list of servers to contact initially")
 
 	pflag.BoolVar(&quiet, "quiet", false, "don't print the periodic messages")
 	pflag.StringSliceVarP(&ourKeys, "announce", "a", nil, "the list of keys to announce on")
@@ -153,9 +59,10 @@ func main() {
 		log.Fatal("announce and query cannot be run in the same command")
 	}
 
+	cmdUtils.Verbose = !quiet
 	dhtCfg := dhtRpc.Config{
 		ID:          cfg.ID,
-		BootStrap:   cfg.parseBootstrap(),
+		BootStrap:   cmdUtils.ParseAddrs(cfg.Bootstrap),
 		Port:        cfg.Port,
 		Ephemeral:   cfg.Ephemeral || len(queryKeys) > 0,
 		Concurrency: cfg.Concurrency,
@@ -167,12 +74,12 @@ func main() {
 	defer dht.Close()
 	log.Println("hyperdht listening on", dht.Addr())
 
-	ctx := interruptCtx()
+	ctx := cmdUtils.InterruptCtx()
 	if len(queryKeys) > 0 {
-		iterateKeys(ctx, dht, queryKeys, query)
+		iterateKeys(ctx, dht, queryKeys, cmdUtils.Query)
 	} else if len(ourKeys) > 0 {
-		iterateKeys(ctx, dht, ourKeys, announce)
+		iterateKeys(ctx, dht, ourKeys, cmdUtils.Announce)
 	} else {
-		normal(ctx, dht)
+		cmdUtils.Bootstrap(ctx, dht)
 	}
 }

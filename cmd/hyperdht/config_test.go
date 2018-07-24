@@ -2,7 +2,6 @@ package main
 
 import (
 	"io/ioutil"
-	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -30,7 +29,7 @@ func TestJSONParsing(t *testing.T) {
 
 	expected := config{
 		Port: 49737,
-		BootStrap: []string{
+		Bootstrap: []string{
 			"dht1.daplie.com",
 			"other.example.com:12345",
 		},
@@ -63,7 +62,7 @@ bootstrap:
 
 	expected := config{
 		Port: 49737,
-		BootStrap: []string{
+		Bootstrap: []string{
 			"dht1.daplie.com",
 			"other.example.com:12345",
 		},
@@ -76,24 +75,6 @@ bootstrap:
 	}
 	if !reflect.DeepEqual(cfg, expected) {
 		t.Errorf("config was %+v, expected %+v", cfg, expected)
-	}
-}
-
-func TestBootstrapParsing(t *testing.T) {
-	cfg := config{
-		BootStrap: []string{
-			"dht1.daplie.com",
-			"192.168.25.1:12345",
-		},
-	}
-
-	parsed := cfg.parseBootstrap()
-	expected := []net.Addr{
-		&net.UDPAddr{IP: net.IPv4(138, 197, 217, 160), Port: 49737},
-		&net.UDPAddr{IP: net.IPv4(192, 168, 25, 1), Port: 12345},
-	}
-	if !reflect.DeepEqual(parsed, expected) {
-		t.Errorf("parsed was %+v, expected %+v", parsed, expected)
 	}
 }
 

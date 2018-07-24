@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io/ioutil"
-	"net"
 	"path/filepath"
 
 	"github.com/pkg/errors"
@@ -35,7 +34,7 @@ type config struct {
 	ID          hexID    `json:"id"`
 	Ephemeral   bool     `json:"ephemeral"`
 	Concurrency int      `json:"concurrency"`
-	BootStrap   []string `json:"bootstrap"`
+	Bootstrap   []string `json:"bootstrap"`
 	Port        int      `json:"port"`
 }
 
@@ -60,23 +59,4 @@ func (c *config) Set(filename string) error {
 
 	err = parse(file, c)
 	return errors.WithMessage(err, "failed to parse config file")
-}
-
-func (c *config) parseBootstrap() []net.Addr {
-	result := make([]net.Addr, 0, len(c.BootStrap))
-	for _, input := range c.BootStrap {
-		// The node code defaulted to port 49737 for bootstrap nodes, and so will we. Both
-		// SplitHostPort and ResolveUDPAddr will error if there isn't a port specified in the
-		// string, so we just assume if the split fails it's because there wasn't a port and
-		// we add one. If the assumption is wrong the resolve will still fail anyway.
-		if _, _, err := net.SplitHostPort(input); err != nil {
-			input = net.JoinHostPort(input, "49737")
-		}
-		if addr, err := net.ResolveUDPAddr("udp4", input); err != nil {
-			panic(errors.Errorf("invalid address %q: %v", input, err))
-		} else {
-			result = append(result, addr)
-		}
-	}
-	return result
 }
