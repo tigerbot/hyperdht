@@ -12,7 +12,6 @@ func (a customAddr) Network() string { return "test address" }
 func (a customAddr) String() string  { return string(a) }
 
 func TestIPv4Encoder(t *testing.T) {
-	encoder := IPv4Encoder{}
 	type expectation struct {
 		addr net.Addr
 		buf  []byte
@@ -27,10 +26,10 @@ func TestIPv4Encoder(t *testing.T) {
 		{customAddr("45.55.95.192:32754"), []byte{45, 55, 95, 192, 0x7f, 0xf2}},
 	}
 	for _, e := range expected {
-		if buf := encoder.EncodeAddr(e.addr); !bytes.Equal(buf, e.buf) {
+		if buf := IPv4Encoder.EncodeAddr(e.addr); !bytes.Equal(buf, e.buf) {
 			t.Errorf("%s encoded to %x, expected %x", e.addr, buf, e.buf)
 		}
-		if addr := encoder.DecodeAddr(e.buf); addr.String() != e.addr.String() {
+		if addr := IPv4Encoder.DecodeAddr(e.buf); addr.String() != e.addr.String() {
 			t.Errorf("%x decoded to %s, expected %s", e.buf, addr, e.addr)
 		}
 	}
@@ -48,18 +47,18 @@ func TestIPv4Encoder(t *testing.T) {
 		{nil, nil},
 	}
 	for _, e := range expected {
-		if buf := encoder.EncodeAddr(e.addr); !bytes.Equal(buf, e.buf) {
+		if buf := IPv4Encoder.EncodeAddr(e.addr); !bytes.Equal(buf, e.buf) {
 			t.Errorf("%s encoded to %x, expected %x", e.addr, buf, e.buf)
 		}
 	}
 
-	if addr := encoder.DecodeAddr([]byte{192, 168, 254, 254}); addr != nil {
+	if addr := IPv4Encoder.DecodeAddr([]byte{192, 168, 254, 254}); addr != nil {
 		t.Errorf("decoded bad length buffer produced %q, expected <nil>", addr)
 	}
 }
 
 func TestIPv4NodeEncoder(t *testing.T) {
-	enc := NodeEncoder{IPEncoder: IPv4Encoder{}, IDSize: 2}
+	enc := NodeEncoder{IPEncoder: IPv4Encoder, IDSize: 2}
 
 	input := []Node{
 		BasicNode{MyID: []byte{0x00, 0x00}, MyAddr: customAddr("192.168.1.1:4278")},

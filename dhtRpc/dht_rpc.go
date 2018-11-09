@@ -539,9 +539,9 @@ func New(cfg *Config) (*DHT, error) {
 	result.bootstrap = c.BootStrap
 
 	if c.IPv6 {
-		result.encoder.IPEncoder = ipEncoding.IPv6Encoder{}
+		result.encoder.IPEncoder = ipEncoding.IPv6Encoder
 	} else {
-		result.encoder.IPEncoder = ipEncoding.IPv4Encoder{}
+		result.encoder.IPEncoder = ipEncoding.IPv4Encoder
 	}
 	result.encoder.IDSize = IDSize
 

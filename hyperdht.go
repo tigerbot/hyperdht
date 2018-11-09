@@ -149,7 +149,7 @@ func (d *HyperDHT) processPeers(req *request, from net.Addr, target []byte, isUp
 	}
 	if isUpdate && req.GetType() == announceType {
 		info := &peerInfo{encoded: peer}
-		if (ipEncoding.IPv4Encoder{}).DecodeAddr(req.LocalAddress) != nil {
+		if ipEncoding.IPv4Encoder.DecodeAddr(req.LocalAddress) != nil {
 			info.localFilter = req.LocalAddress[:2]
 			info.localPeer = req.LocalAddress[2:]
 		}
@@ -227,7 +227,7 @@ func createRequest(kind uint32, opts *QueryOpts) *request {
 		Type: &kind,
 	}
 	if opts != nil {
-		req.LocalAddress = (ipEncoding.IPv4Encoder{}).EncodeAddr(opts.LocalAddr)
+		req.LocalAddress = ipEncoding.IPv4Encoder.EncodeAddr(opts.LocalAddr)
 		if port := uint32(opts.Port); port != 0 {
 			req.Port = &port
 		}

@@ -109,7 +109,7 @@ func (s *QueryStream) decodeLocalPeers(buf []byte) []net.Addr {
 	list := make([]net.Addr, len(buf)/4)
 	for i := range list {
 		cp = append(cp[:2], buf[4*i:4*(i+1)]...)
-		list[i] = ipEncoding.IPv4Encoder{}.DecodeAddr(cp)
+		list[i] = ipEncoding.IPv4Encoder.DecodeAddr(cp)
 	}
 	return list
 }

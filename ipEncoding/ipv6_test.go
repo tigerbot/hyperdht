@@ -7,7 +7,6 @@ import (
 )
 
 func TestIPv6Encoder(t *testing.T) {
-	encoder := IPv6Encoder{}
 	type expectation struct {
 		addr net.Addr
 		buf  []byte
@@ -26,10 +25,10 @@ func TestIPv6Encoder(t *testing.T) {
 			[]byte{0xaf, 0xbc, 0xde, 0xad, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xbe, 0xef, 0x7f, 0xf2}},
 	}
 	for _, e := range expected {
-		if buf := encoder.EncodeAddr(e.addr); !bytes.Equal(buf, e.buf) {
+		if buf := IPv6Encoder.EncodeAddr(e.addr); !bytes.Equal(buf, e.buf) {
 			t.Errorf("%s encoded to %x, expected %x", e.addr, buf, e.buf)
 		}
-		if addr := encoder.DecodeAddr(e.buf); addr.String() != e.addr.String() {
+		if addr := IPv6Encoder.DecodeAddr(e.buf); addr.String() != e.addr.String() {
 			t.Errorf("%x decoded to %s, expected %s", e.buf, addr, e.addr)
 		}
 	}
@@ -41,21 +40,21 @@ func TestIPv6Encoder(t *testing.T) {
 		nil,
 	}
 	for _, e := range badAddrs {
-		if buf := encoder.EncodeAddr(e); buf != nil {
+		if buf := IPv6Encoder.EncodeAddr(e); buf != nil {
 			t.Errorf("%s encoded to %x, expected nil", e, buf)
 		}
 	}
 
 	buf := make([]byte, 20)
 	for _, l := range []int{0, 1, 3, 6, 7, 9, 12, 15, 19, 20} {
-		if out := encoder.DecodeAddr(buf[:l]); out != nil {
+		if out := IPv6Encoder.DecodeAddr(buf[:l]); out != nil {
 			t.Errorf("decoding buffer of size %d produced %#v, expected <nil>", l, out)
 		}
 	}
 }
 
 func TestIPv6NodeEncoder(t *testing.T) {
-	enc := NodeEncoder{IPEncoder: IPv6Encoder{}, IDSize: 2}
+	enc := NodeEncoder{IPEncoder: IPv6Encoder, IDSize: 2}
 
 	input := []Node{
 		BasicNode{MyID: []byte{0x00, 0x00}, MyAddr: customAddr("192.168.1.1:4278")},

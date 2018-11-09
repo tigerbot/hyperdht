@@ -13,19 +13,23 @@ type IPEncoder interface {
 	EncodeAddr(net.Addr) []byte
 	DecodeAddr([]byte) net.Addr
 
-	// EncodedLen should return the bytes used to encode a single address.
+	// EncodedLen should return the # of bytes used to encode a single address.
 	EncodedLen() int
 }
 
-// IPv4Encoder is an implementation of IPEncoder that encodes the IP address as 4 bytes and the
-// port as 2 bytes.
-type IPv4Encoder struct{}
+// Encoders for the 2 different IP address schemas.
+var (
+	IPv4Encoder IPEncoder = ipv4Encoder{}
+	IPv6Encoder IPEncoder = ipv6Encoder{}
+)
 
-// IPv6Encoder is an implementation of IPEncoder that encodes the IP address as 16 bytes and the
+// ipv4Encoder is an implementation of IPEncoder that encodes the IP address as 4 bytes and the
 // port as 2 bytes.
-type IPv6Encoder struct{}
+type ipv4Encoder struct{}
 
-var _, _ IPEncoder = IPv4Encoder{}, IPv6Encoder{}
+// ipv6Encoder is an implementation of IPEncoder that encodes the IP address as 16 bytes and the
+// port as 2 bytes.
+type ipv6Encoder struct{}
 
 func extractHostPort(peer net.Addr) (net.IP, int) {
 	if peer == nil {
@@ -47,7 +51,7 @@ func readPort(buf []byte) int        { return int(buf[0])<<8 | int(buf[1]) }
 
 // EncodeAddr implements IPEncoder.EncodeAddr. If the address is not an IPv4 address or an IPv6
 // encoded version of an IPv4 address it will return nil.
-func (e IPv4Encoder) EncodeAddr(peer net.Addr) []byte {
+func (e ipv4Encoder) EncodeAddr(peer net.Addr) []byte {
 	host, port := extractHostPort(peer)
 	host = host.To4() // this is safe to call on nil IP addresses
 	if port == 0 || host == nil || host.IsUnspecified() {
@@ -61,7 +65,7 @@ func (e IPv4Encoder) EncodeAddr(peer net.Addr) []byte {
 
 // DecodeAddr implements IPEncoder.DecodeAddr and reverses EncodeAddr. If the buffer is not
 // exactly what's returned by EncodedLen it will return nil.
-func (e IPv4Encoder) DecodeAddr(buf []byte) net.Addr {
+func (e ipv4Encoder) DecodeAddr(buf []byte) net.Addr {
 	if len(buf) != e.EncodedLen() {
 		return nil
 	}
@@ -71,10 +75,10 @@ func (e IPv4Encoder) DecodeAddr(buf []byte) net.Addr {
 }
 
 // EncodedLen implements IPEncoder.EncodedLen and returns 6.
-func (e IPv4Encoder) EncodedLen() int { return net.IPv4len + 2 }
+func (e ipv4Encoder) EncodedLen() int { return net.IPv4len + 2 }
 
 // EncodeAddr implements IPEncoder.EncodeAddr. If the address is not an IP it will return nil.
-func (e IPv6Encoder) EncodeAddr(peer net.Addr) []byte {
+func (e ipv6Encoder) EncodeAddr(peer net.Addr) []byte {
 	host, port := extractHostPort(peer)
 	host = host.To16() // this is safe to call on nil IP addresses
 	if port == 0 || host == nil || host.IsUnspecified() {
@@ -89,7 +93,7 @@ func (e IPv6Encoder) EncodeAddr(peer net.Addr) []byte {
 
 // DecodeAddr implements IPEncoder.DecodeAddr and reverses EncodeAddr. If the buffer is not
 // exactly what's returned by EncodedLen it will return nil.
-func (e IPv6Encoder) DecodeAddr(buf []byte) net.Addr {
+func (e ipv6Encoder) DecodeAddr(buf []byte) net.Addr {
 	if len(buf) != e.EncodedLen() {
 		return nil
 	}
@@ -99,4 +103,4 @@ func (e IPv6Encoder) DecodeAddr(buf []byte) net.Addr {
 }
 
 // EncodedLen implements IPEncoder.EncodedLen and returns 18.
-func (e IPv6Encoder) EncodedLen() int { return net.IPv6len + 2 }
+func (e ipv6Encoder) EncodedLen() int { return net.IPv6len + 2 }
