@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"gitlab.daplie.com/core-sdk/hyperdht/fakeNetwork"
+
+	"github.com/tigerbot/hyperdht/fakeNetwork"
 )
 
 // These values are all modified in the `race_test.go` file that is only included in the build

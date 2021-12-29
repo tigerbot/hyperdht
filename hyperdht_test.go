@@ -7,9 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.daplie.com/core-sdk/hyperdht/fakeNetwork"
-
-	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
+	"github.com/tigerbot/hyperdht/dhtRpc"
+	"github.com/tigerbot/hyperdht/fakeNetwork"
 )
 
 type dhtPair struct {

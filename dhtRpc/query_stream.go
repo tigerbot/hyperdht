@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
+	"github.com/tigerbot/hyperdht/kbucket"
 )
 
 // A Query contains the information that will be sent to other peers.

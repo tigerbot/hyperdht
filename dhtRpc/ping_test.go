@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.daplie.com/core-sdk/hyperdht/fakeNetwork"
+	"github.com/tigerbot/hyperdht/fakeNetwork"
 )
 
 func TestPing(t *testing.T) { dualIPTest(t, pingTest) }

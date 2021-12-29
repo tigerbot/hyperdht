@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.daplie.com/core-sdk/hyperdht"
+	"github.com/tigerbot/hyperdht"
 )
 
 // Verbose determines whether to print out periodic messages about bootstrapping and announcing.

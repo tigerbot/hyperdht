@@ -10,8 +10,8 @@ import (
 
 	"github.com/anacrolix/utp"
 
-	"gitlab.daplie.com/core-sdk/hyperdht"
-	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
+	"github.com/tigerbot/hyperdht"
+	"github.com/tigerbot/hyperdht/dhtRpc"
 )
 
 func HandleConn(wait *sync.WaitGroup, c net.Conn) {

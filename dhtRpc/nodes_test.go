@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
+	"github.com/tigerbot/hyperdht/kbucket"
 )
 
 func TestQueryNodeListOrder(t *testing.T) {

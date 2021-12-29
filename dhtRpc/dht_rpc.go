@@ -16,10 +16,10 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 
-	"gitlab.daplie.com/core-sdk/hyperdht/internal/protoSchemas"
-	"gitlab.daplie.com/core-sdk/hyperdht/ipEncoding"
-	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
-	"gitlab.daplie.com/core-sdk/hyperdht/udpRequest"
+	"github.com/tigerbot/hyperdht/internal/protoSchemas"
+	"github.com/tigerbot/hyperdht/ipEncoding"
+	"github.com/tigerbot/hyperdht/kbucket"
+	"github.com/tigerbot/hyperdht/udpRequest"
 )
 
 type (

@@ -5,8 +5,8 @@ import (
 	"net"
 	"sync"
 
-	"gitlab.daplie.com/core-sdk/hyperdht/ipEncoding"
-	"gitlab.daplie.com/core-sdk/hyperdht/kbucket"
+	"github.com/tigerbot/hyperdht/ipEncoding"
+	"github.com/tigerbot/hyperdht/kbucket"
 )
 
 // A Node represents another peer

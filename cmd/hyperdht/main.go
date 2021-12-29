@@ -10,9 +10,9 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"gitlab.daplie.com/core-sdk/hyperdht"
-	"gitlab.daplie.com/core-sdk/hyperdht/cmd/internal/cmdUtils"
-	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
+	"github.com/tigerbot/hyperdht"
+	"github.com/tigerbot/hyperdht/cmd/internal/cmdUtils"
+	"github.com/tigerbot/hyperdht/dhtRpc"
 )
 
 var quiet bool

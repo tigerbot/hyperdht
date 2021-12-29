@@ -11,9 +11,9 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 
-	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
-	"gitlab.daplie.com/core-sdk/hyperdht/internal/protoSchemas"
-	"gitlab.daplie.com/core-sdk/hyperdht/ipEncoding"
+	"github.com/tigerbot/hyperdht/dhtRpc"
+	"github.com/tigerbot/hyperdht/internal/protoSchemas"
+	"github.com/tigerbot/hyperdht/ipEncoding"
 )
 
 const (

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	. "gitlab.daplie.com/core-sdk/hyperdht/fakeNetwork"
+	. "github.com/tigerbot/hyperdht/fakeNetwork"
 )
 
 func TestRandAddrIPv4(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
-	"gitlab.daplie.com/core-sdk/hyperdht/dhtRpc"
-	"gitlab.daplie.com/core-sdk/hyperdht/ipEncoding"
+	"github.com/tigerbot/hyperdht/dhtRpc"
+	"github.com/tigerbot/hyperdht/ipEncoding"
 )
 
 // QueryOpts contains all of the options that can be included in a Lookup or Announce query.

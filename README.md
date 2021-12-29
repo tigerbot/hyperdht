@@ -1,9 +1,9 @@
 # hyperdht
 
-[![GoDoc](https://godoc.org/gitlab.daplie.com/core-sdk/hyperdht?status.svg)](https://godoc.org/gitlab.daplie.com/core-sdk/hyperdht)
-[![Go Report Card](https://goreportcard.com/badge/gitlab.daplie.com/core-sdk/hyperdht)](https://goreportcard.com/report/gitlab.daplie.com/core-sdk/hyperdht)
-[![Build Status](https://gitlab.daplie.com/core-sdk/hyperdht/badges/master/build.svg)](https://gitlab.daplie.com/core-sdk/hyperdht/commits/master)
-[![Coverage Report](https://gitlab.daplie.com/core-sdk/hyperdht/badges/master/coverage.svg)](https://gitlab.daplie.com/core-sdk/hyperdht/commits/master)
+[![GoDoc](https://godoc.org/github.com/tigerbot/hyperdht?status.svg)](https://godoc.org/github.com/tigerbot/hyperdht)
+[![Go Report Card](https://goreportcard.com/badge/github.com/tigerbot/hyperdht)](https://goreportcard.com/report/github.com/tigerbot/hyperdht)
+[![Build Status](https://github.com/tigerbot/hyperdht/badges/master/build.svg)](https://github.com/tigerbot/hyperdht/commits/master)
+[![Coverage Report](https://github.com/tigerbot/hyperdht/badges/master/coverage.svg)](https://github.com/tigerbot/hyperdht/commits/master)
 
 Hyperdht is a golang implementation of a Kademlia based DHT that supports peer
 discovery and distributed hole punching. It uses a DHT that can make RPC calls
