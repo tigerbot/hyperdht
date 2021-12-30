@@ -11,13 +11,13 @@ import (
 	"github.com/anacrolix/utp"
 
 	"github.com/tigerbot/hyperdht"
-	"github.com/tigerbot/hyperdht/dhtRpc"
+	"github.com/tigerbot/hyperdht/dhtrpc"
 )
 
 func EchoConn(c net.Conn) {
 	log.Println("received connection from", c.RemoteAddr())
 	defer c.Close()
-	io.Copy(c, c)
+	io.Copy(c, c) //nolint:errcheck
 }
 
 func AnnounceLoop(ctx context.Context, dht *hyperdht.HyperDHT, key []byte) {
@@ -61,7 +61,7 @@ func ExampleHyperDHT_server() {
 		log.Fatalln("failed to create new UTP socket:", err)
 	}
 
-	dht, err := hyperdht.New(&dhtRpc.Config{BootStrap: bootstrap, Socket: socket})
+	dht, err := hyperdht.New(&dhtrpc.Config{BootStrap: bootstrap, Socket: socket})
 	if err != nil {
 		socket.Close()
 		log.Fatalln("failed to create new DHT:", err)

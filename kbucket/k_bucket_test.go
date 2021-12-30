@@ -128,41 +128,41 @@ func TestClosest(t *testing.T) {
 		bucket.Add(&testContact{i})
 	}
 
-	if close := bucket.Closest(XORDistance([]byte{0x15}), 0); close != nil {
-		t.Errorf("got %#v for 0 closest values, expected nil", close)
+	if closest := bucket.Closest(XORDistance([]byte{0x15}), 0); closest != nil {
+		t.Errorf("got %#v for 0 closest values, expected nil", closest)
 	}
-	if close := bucket.Closest(nil, 5); close != nil {
-		t.Errorf("got %#v for closest values with nil distance comparer, expected nil", close)
+	if closest := bucket.Closest(nil, 5); closest != nil {
+		t.Errorf("got %#v for closest values with nil distance comparer, expected nil", closest)
 	}
 
-	close := bucket.Closest(XORDistance([]byte{0x15}), 3)
+	closest := bucket.Closest(XORDistance([]byte{0x15}), 3)
 	expected := [][]byte{
 		{0x11}, // distance: 00000100
 		{0x10}, // distance: 00000101
 		{0x05}, // distance: 00010000
 	}
-	if len(close) != 3 {
-		t.Errorf("Close returned %d contacts, expected 3", len(close))
+	if len(closest) != 3 {
+		t.Errorf("Close returned %d contacts, expected 3", len(closest))
 	} else {
-		for i := range close {
-			if !bytes.Equal(close[i].ID(), expected[i]) {
-				t.Errorf("wrong ID for contact %d: got %x, expected %x", i, close[i].ID(), expected[i])
+		for i := range closest {
+			if !bytes.Equal(closest[i].ID(), expected[i]) {
+				t.Errorf("wrong ID for contact %d: got %x, expected %x", i, closest[i].ID(), expected[i])
 			}
 		}
 	}
 
-	close = bucket.Closest(XORDistance([]byte{0x11}), 3)
+	closest = bucket.Closest(XORDistance([]byte{0x11}), 3)
 	expected = [][]byte{
 		{0x11}, // distance: 00000000
 		{0x10}, // distance: 00000001
 		{0x01}, // distance: 00010000
 	}
-	if len(close) != 3 {
-		t.Errorf("Close returned %d contacts, expected 3", len(close))
+	if len(closest) != 3 {
+		t.Errorf("Close returned %d contacts, expected 3", len(closest))
 	} else {
-		for i := range close {
-			if !bytes.Equal(close[i].ID(), expected[i]) {
-				t.Errorf("wrong ID for contact %d: got %x, expected %x", i, close[i].ID(), expected[i])
+		for i := range closest {
+			if !bytes.Equal(closest[i].ID(), expected[i]) {
+				t.Errorf("wrong ID for contact %d: got %x, expected %x", i, closest[i].ID(), expected[i])
 			}
 		}
 	}
@@ -174,16 +174,16 @@ func TestClosestAll(t *testing.T) {
 		bucket.Add(&testContact{byte(i / 256), byte(i % 256)})
 	}
 
-	close := bucket.Closest(XORDistance([]byte{0x80, 0x80}), -1)
+	closest := bucket.Closest(XORDistance([]byte{0x80, 0x80}), -1)
 	// Remember that not all of the things we added will actually be added to the tree.
-	if len(close) < 100 {
-		t.Errorf("got closest list length %d, expected at least 100", len(close))
+	if len(closest) < 100 {
+		t.Errorf("got closest list length %d, expected at least 100", len(closest))
 	}
 
 	// Also make sure we don't panic trying to get more than exist.
-	close = bucket.Closest(XORDistance([]byte{0x80, 0x80}), 2e3)
-	if len(close) < 100 {
-		t.Errorf("got closest list length %d, expected at least 100", len(close))
+	closest = bucket.Closest(XORDistance([]byte{0x80, 0x80}), 2e3)
+	if len(closest) < 100 {
+		t.Errorf("got closest list length %d, expected at least 100", len(closest))
 	}
 }
 
@@ -244,16 +244,16 @@ func TestLargeBucket(t *testing.T) {
 	}
 
 	bucket.Add(&testContact{0x55, 0x00})
-	close := bucket.Closest(XORDistance([]byte{0x55, 0x05}), DefaultBucketSize+2)
-	if expected := (&testContact{0x55, 0x00}); !reflect.DeepEqual(close[0], expected) {
-		t.Errorf("first closest contact is %#v, expected %#v", close[0], expected)
+	closest := bucket.Closest(XORDistance([]byte{0x55, 0x05}), DefaultBucketSize+2)
+	if expected := (&testContact{0x55, 0x00}); !reflect.DeepEqual(closest[0], expected) {
+		t.Errorf("first closest contact is %#v, expected %#v", closest[0], expected)
 	}
-	for i, c := range close[1 : DefaultBucketSize+1] {
+	for i, c := range closest[1 : DefaultBucketSize+1] {
 		if id := c.ID(); id[0] != 0x54 {
 			t.Errorf("first byte of contact #%d is 0x%02x, expected 0x54", i, id[0])
 		}
 	}
-	if expected := (&testContact{0x56, 0x05}); !reflect.DeepEqual(close[DefaultBucketSize+1], expected) {
-		t.Errorf("most distant contact is %#v, expected %#v", close[DefaultBucketSize+1], expected)
+	if expected := (&testContact{0x56, 0x05}); !reflect.DeepEqual(closest[DefaultBucketSize+1], expected) {
+		t.Errorf("most distant contact is %#v, expected %#v", closest[DefaultBucketSize+1], expected)
 	}
 }

@@ -1,0 +1,24 @@
+run:
+  allow-parallel-runners: true
+
+linters:
+  enable:
+    - gocritic
+    - gofmt
+    - nakedret
+    - prealloc
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  gocritic:
+    enabled-checks:
+      - builtinShadow
+      - emptyStringTest
+      - importShadow
+      - paramTypeCombine
+
+  nakedret:
+    max-func-lines: 0

@@ -8,6 +8,7 @@ package kbucket
 
 import (
 	"crypto/rand"
+	"fmt"
 	"sort"
 	"sync"
 )
@@ -263,7 +264,9 @@ func New(cfg *Config) *KBucket {
 
 	if c.LocalID == nil {
 		c.LocalID = make([]byte, 20)
-		rand.Read(c.LocalID)
+		if n, err := rand.Read(c.LocalID); err != nil || n != 20 {
+			panic(fmt.Errorf("read %d/20 expected random bytes for ID: %w", n, err))
+		}
 	}
 	if c.BucketSize == 0 {
 		c.BucketSize = DefaultBucketSize

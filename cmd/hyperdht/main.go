@@ -11,8 +11,8 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/tigerbot/hyperdht"
-	"github.com/tigerbot/hyperdht/cmd/internal/cmdUtils"
-	"github.com/tigerbot/hyperdht/dhtRpc"
+	"github.com/tigerbot/hyperdht/cmd/internal/cmdutils"
+	"github.com/tigerbot/hyperdht/dhtrpc"
 )
 
 var quiet bool
@@ -59,10 +59,10 @@ func main() {
 		log.Fatal("announce and query cannot be run in the same command")
 	}
 
-	cmdUtils.Verbose = !quiet
-	dhtCfg := dhtRpc.Config{
+	cmdutils.Verbose = !quiet
+	dhtCfg := dhtrpc.Config{
 		ID:          cfg.ID,
-		BootStrap:   cmdUtils.ParseAddrs(cfg.Bootstrap),
+		BootStrap:   cmdutils.ParseAddrs(cfg.Bootstrap),
 		Port:        cfg.Port,
 		Ephemeral:   cfg.Ephemeral || len(queryKeys) > 0,
 		Concurrency: cfg.Concurrency,
@@ -74,12 +74,12 @@ func main() {
 	defer dht.Close()
 	log.Println("hyperdht listening on", dht.Addr())
 
-	ctx := cmdUtils.InterruptCtx()
+	ctx := cmdutils.InterruptCtx()
 	if len(queryKeys) > 0 {
-		iterateKeys(ctx, dht, queryKeys, cmdUtils.Query)
+		iterateKeys(ctx, dht, queryKeys, cmdutils.Query)
 	} else if len(ourKeys) > 0 {
-		iterateKeys(ctx, dht, ourKeys, cmdUtils.Announce)
+		iterateKeys(ctx, dht, ourKeys, cmdutils.Announce)
 	} else {
-		cmdUtils.Bootstrap(ctx, dht)
+		cmdutils.Bootstrap(ctx, dht)
 	}
 }

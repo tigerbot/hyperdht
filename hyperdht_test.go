@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tigerbot/hyperdht/dhtRpc"
-	"github.com/tigerbot/hyperdht/fakeNetwork"
+	"github.com/tigerbot/hyperdht/dhtrpc"
+	"github.com/tigerbot/hyperdht/fakenetwork"
 )
 
 type dhtPair struct {
-	network   *fakeNetwork.FakeNetwork
+	network   *fakenetwork.FakeNetwork
 	bootstrap *HyperDHT
 	server    *HyperDHT
 	client    *HyperDHT
@@ -40,22 +40,22 @@ func (s *dhtPair) Close() {
 }
 
 func createPair(t *testing.T, ipv6 bool) *dhtPair {
-	result := &dhtPair{network: fakeNetwork.New()}
-	modConfig := func(cfg *dhtRpc.Config) *dhtRpc.Config {
+	result := &dhtPair{network: fakenetwork.New()}
+	modConfig := func(cfg *dhtrpc.Config) *dhtrpc.Config {
 		cp := *cfg
-		cp.Socket = result.network.NewNode(fakeNetwork.RandomAddress(ipv6), true)
+		cp.Socket = result.network.NewNode(fakenetwork.RandomAddress(ipv6), true)
 		return &cp
 	}
 
 	var err error
-	if result.bootstrap, err = New(modConfig(&dhtRpc.Config{IPv6: ipv6})); err != nil {
+	if result.bootstrap, err = New(modConfig(&dhtrpc.Config{IPv6: ipv6})); err != nil {
 		t.Fatal("failed to create bootstrap node:", err)
 	}
 	// Make sure that overriding the important handlers can't be done.
 	result.bootstrap.OnQuery(queryCmd, nil)
 	result.bootstrap.OnQuery(queryCmd, nil)
 
-	cfg := &dhtRpc.Config{
+	cfg := &dhtrpc.Config{
 		BootStrap: []net.Addr{result.bootstrap.Addr()},
 		IPv6:      ipv6,
 	}
@@ -263,7 +263,7 @@ func TestQueryCancel(t *testing.T) {
 }
 
 func TestCoveragePadding(t *testing.T) {
-	cfg := &dhtRpc.Config{Port: 14253}
+	cfg := &dhtrpc.Config{Port: 14253}
 	node, err := New(cfg)
 	if err != nil {
 		t.Fatalf("failed to create first node using %v: %v", cfg, err)
@@ -286,7 +286,7 @@ func TestCoveragePadding(t *testing.T) {
 			}
 		}()
 		stream := node.createStream(context.Background(), []byte("not a real key"), req)
-		if err := dhtRpc.DiscardStream(stream); err != nil {
+		if err := dhtrpc.DiscardStream(stream); err != nil {
 			t.Error("the stream that shouldn't have been created errored:", err)
 		}
 	}

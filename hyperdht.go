@@ -8,12 +8,12 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
+	"google.golang.org/protobuf/proto"
 
-	"github.com/tigerbot/hyperdht/dhtRpc"
-	"github.com/tigerbot/hyperdht/internal/protoSchemas"
-	"github.com/tigerbot/hyperdht/ipEncoding"
+	"github.com/tigerbot/hyperdht/dhtrpc"
+	"github.com/tigerbot/hyperdht/internal/protoschemas"
+	"github.com/tigerbot/hyperdht/ipencoding"
 )
 
 const (
@@ -25,22 +25,22 @@ const (
 )
 
 type (
-	request  = protoSchemas.PeerRequest
-	response = protoSchemas.PeerResponse
+	request  = protoschemas.PeerRequest
+	response = protoschemas.PeerResponse
 )
 
 // HyperDHT wraps a DHT RPC instance and handles the particular calls needed for peer
-// discovery. All methods that can be called on a dhtRpc.DHT instance can be called
+// discovery. All methods that can be called on a dhtrpc.DHT instance can be called
 // on a HyperDHT instance even though it's not embedded publicly.
 type HyperDHT struct {
 	*dht
 	store store
 }
-type dht = dhtRpc.DHT
+type dht = dhtrpc.DHT
 
 // OnQuery calls the OnQuery method for the underlying DHT RPC only if the command isn't
 // the one the hyperdht needs to function properly.
-func (d *HyperDHT) OnQuery(cmd string, handler dhtRpc.QueryHandler) {
+func (d *HyperDHT) OnQuery(cmd string, handler dhtrpc.QueryHandler) {
 	if cmd != queryCmd {
 		d.dht.OnQuery(cmd, handler)
 	}
@@ -48,7 +48,7 @@ func (d *HyperDHT) OnQuery(cmd string, handler dhtRpc.QueryHandler) {
 
 // OnUpdate calls the OnUpdate method for the underlying DHT RPC only if the command isn't
 // the one the hyperdht needs to function properly.
-func (d *HyperDHT) OnUpdate(cmd string, handler dhtRpc.QueryHandler) {
+func (d *HyperDHT) OnUpdate(cmd string, handler dhtrpc.QueryHandler) {
 	if cmd != queryCmd {
 		d.dht.OnUpdate(cmd, handler)
 	}
@@ -61,7 +61,7 @@ func (d *HyperDHT) createStream(ctx context.Context, key []byte, req *request) *
 		panic(errors.WithMessage(err, "marshalling initial request buffer"))
 	}
 
-	query := &dhtRpc.Query{
+	query := &dhtrpc.Query{
 		Command: queryCmd,
 		Target:  key,
 		Value:   reqBuf,
@@ -70,7 +70,7 @@ func (d *HyperDHT) createStream(ctx context.Context, key []byte, req *request) *
 	case lookupType:
 		return d.dht.Query(ctx, query, nil)
 	case announceType:
-		return d.dht.Update(ctx, query, &dhtRpc.QueryOpts{Verbose: true})
+		return d.dht.Update(ctx, query, &dhtrpc.QueryOpts{Verbose: true})
 	case unannounceType:
 		return d.dht.Update(ctx, query, nil)
 	}
@@ -107,21 +107,21 @@ func (d *HyperDHT) Announce(ctx context.Context, key []byte, opts *QueryOpts) *Q
 // is complete and will discard all responses from the peers instead of processing and converting
 // them to the response type of this package.
 func (d *HyperDHT) AnnounceDiscard(ctx context.Context, key []byte, opts *QueryOpts) error {
-	return dhtRpc.DiscardStream(d.createStream(ctx, key, createRequest(announceType, opts)))
+	return dhtrpc.DiscardStream(d.createStream(ctx, key, createRequest(announceType, opts)))
 }
 
 // Unannounce removes this node from the DHT.
 func (d *HyperDHT) Unannounce(ctx context.Context, key []byte, opts *QueryOpts) error {
-	return dhtRpc.DiscardStream(d.createStream(ctx, key, createRequest(unannounceType, opts)))
+	return dhtrpc.DiscardStream(d.createStream(ctx, key, createRequest(unannounceType, opts)))
 }
 
-func (d *HyperDHT) onQuery(n dhtRpc.Node, q *dhtRpc.Query) ([]byte, error) {
+func (d *HyperDHT) onQuery(n dhtrpc.Node, q *dhtrpc.Query) ([]byte, error) {
 	return d.onRequest(n, q, false)
 }
-func (d *HyperDHT) onUpdate(n dhtRpc.Node, q *dhtRpc.Query) ([]byte, error) {
+func (d *HyperDHT) onUpdate(n dhtrpc.Node, q *dhtrpc.Query) ([]byte, error) {
 	return d.onRequest(n, q, true)
 }
-func (d *HyperDHT) onRequest(n dhtRpc.Node, q *dhtRpc.Query, isUpdate bool) ([]byte, error) {
+func (d *HyperDHT) onRequest(n dhtrpc.Node, q *dhtrpc.Query, isUpdate bool) ([]byte, error) {
 	var req request
 	if err := proto.Unmarshal(q.Value, &req); err == nil {
 		if res := d.processPeers(&req, n.Addr(), q.Target, isUpdate); res != nil {
@@ -149,7 +149,7 @@ func (d *HyperDHT) processPeers(req *request, from net.Addr, target []byte, isUp
 	}
 	if isUpdate && req.GetType() == announceType {
 		info := &peerInfo{encoded: peer}
-		if ipEncoding.IPv4Encoder.DecodeAddr(req.LocalAddress) != nil {
+		if ipencoding.IPv4Encoder.DecodeAddr(req.LocalAddress) != nil {
 			info.localFilter = req.LocalAddress[:2]
 			info.localPeer = req.LocalAddress[2:]
 		}
@@ -185,8 +185,8 @@ func (d *HyperDHT) processPeers(req *request, from net.Addr, target []byte, isUp
 }
 
 // New creates a new HyperDHT, using the provided config to create a new DHT RPC instance.
-func New(cfg *dhtRpc.Config) (*HyperDHT, error) {
-	dht, err := dhtRpc.New(cfg)
+func New(cfg *dhtrpc.Config) (*HyperDHT, error) {
+	dht, err := dhtrpc.New(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func New(cfg *dhtRpc.Config) (*HyperDHT, error) {
 }
 
 // NewWithDHT creates a new HyperDHT using the provided DHT RPC instance.
-func NewWithDHT(dht *dhtRpc.DHT) *HyperDHT {
+func NewWithDHT(dht *dhtrpc.DHT) *HyperDHT {
 	result := &HyperDHT{dht: dht}
 	result.store.gc()
 	dht.OnQuery(queryCmd, result.onQuery)
@@ -227,7 +227,7 @@ func createRequest(kind uint32, opts *QueryOpts) *request {
 		Type: &kind,
 	}
 	if opts != nil {
-		req.LocalAddress = ipEncoding.IPv4Encoder.EncodeAddr(opts.LocalAddr)
+		req.LocalAddress = ipencoding.IPv4Encoder.EncodeAddr(opts.LocalAddr)
 		if port := uint32(opts.Port); port != 0 {
 			req.Port = &port
 		}

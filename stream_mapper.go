@@ -4,10 +4,10 @@ import (
 	"context"
 	"net"
 
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
-	"github.com/tigerbot/hyperdht/dhtRpc"
-	"github.com/tigerbot/hyperdht/ipEncoding"
+	"github.com/tigerbot/hyperdht/dhtrpc"
+	"github.com/tigerbot/hyperdht/ipencoding"
 )
 
 // QueryOpts contains all of the options that can be included in a Lookup or Announce query.
@@ -34,16 +34,16 @@ type QueryResponse struct {
 	LocalPeers []net.Addr
 }
 
-type subStream = dhtRpc.QueryStream
+type subStream = dhtrpc.QueryStream
 
 // QueryStream parses the raw responses from the DHT RPC and emits them on its response channel.
 //
-// The dhtRpc.QueryStream is embedded in a way that makes all of its Public methods available
+// The dhtrpc.QueryStream is embedded in a way that makes all of its Public methods available
 // to be called on this QueryStream even though it can't be directly accessed.
 type QueryStream struct {
 	*subStream
 	localAddr []byte
-	encoder   ipEncoding.IPEncoder
+	encoder   ipencoding.IPEncoder
 
 	ctx      context.Context
 	respChan chan QueryResponse
@@ -109,7 +109,7 @@ func (s *QueryStream) decodeLocalPeers(buf []byte) []net.Addr {
 	list := make([]net.Addr, len(buf)/4)
 	for i := range list {
 		cp = append(cp[:2], buf[4*i:4*(i+1)]...)
-		list[i] = ipEncoding.IPv4Encoder.DecodeAddr(cp)
+		list[i] = ipencoding.IPv4Encoder.DecodeAddr(cp)
 	}
 	return list
 }
@@ -117,7 +117,7 @@ func (s *QueryStream) decodeLocalPeers(buf []byte) []net.Addr {
 // CollectStream reads from a QueryStream's channels until the query is complete and returns
 // all responses written the the response channel and the final error.
 func CollectStream(stream *QueryStream) ([]QueryResponse, error) {
-	var responses []QueryResponse
+	responses := []QueryResponse{}
 	for resp := range stream.ResponseChan() {
 		responses = append(responses, resp)
 	}

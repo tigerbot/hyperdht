@@ -11,13 +11,13 @@ import (
 	"github.com/anacrolix/utp"
 
 	"github.com/tigerbot/hyperdht"
-	"github.com/tigerbot/hyperdht/dhtRpc"
+	"github.com/tigerbot/hyperdht/dhtrpc"
 )
 
 func HandleConn(wait *sync.WaitGroup, c net.Conn) {
 	defer wait.Done()
 	defer c.Close()
-	c.SetDeadline(time.Now().Add(time.Second))
+	c.SetDeadline(time.Now().Add(time.Second)) //nolint:errcheck
 
 	buf := make([]byte, 128)
 	if _, err := c.Write([]byte("Hello world!")); err != nil {
@@ -52,7 +52,7 @@ func ExampleHyperDHT_client() {
 
 	// We make this node ephemeral because it will make a single query and then disappear, so
 	// it's not worth making the other nodes store this one.
-	dht, err := hyperdht.New(&dhtRpc.Config{BootStrap: bootstrap, Socket: socket, Ephemeral: true})
+	dht, err := hyperdht.New(&dhtrpc.Config{BootStrap: bootstrap, Socket: socket, Ephemeral: true})
 	if err != nil {
 		socket.Close()
 		log.Fatalln("failed to create new DHT:", err)

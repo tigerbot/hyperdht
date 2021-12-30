@@ -42,22 +42,22 @@ when this would be appropriate/necessary does not exist in this layer.
 
 Implementation is based on [mafintosh's `upd-request` written for nodejs](https://github.com/mafintosh/udp-request).
 
-## ipEncoding
+## ipencoding
 
-Package ipEncoding converts between IP addresses (with ports) and binary buffers.
+Package ipencoding converts between IP addresses (with ports) and binary buffers.
 It also handles encoding/decoding "nodes", which are just IDs associated with an
 IP address. Both IPv4 and IPv6 encodings are supported.
 
 Encoding is originally based on [mafintosh's `ipv4-peers` written for nodejs](https://github.com/mafintosh/ipv4-peers).
 
-## dhtRpc
+## dhtrpc
 
-Package dhtRpc makes calls over a Kademlia based DHT.
+Package dhtrpc makes calls over a Kademlia based DHT.
 The DHT uses the [`udpRequest` package](#udpRequest) to send [protobuf](https://developers.google.com/protocol-buffers/)
 encoded messages between peers. Anytime a message containing a valid ID is
 received the node is stored using the [`kbucket` package](#kbucket), and any
 responses that are sent will include its stored nodes closest to the target of
-the request, encoded using the [`ipEncoding` package](#ipEncoding) (excluding
+the request, encoded using the [`ipencoding` package](#ipencoding) (excluding
 responses to the special `ping` query). This allows a DHT node making queries to
 progressively find and make requests to the nodes closest to the query's target.
 

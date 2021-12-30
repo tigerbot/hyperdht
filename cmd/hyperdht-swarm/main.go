@@ -11,19 +11,19 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/tigerbot/hyperdht"
-	"github.com/tigerbot/hyperdht/cmd/internal/cmdUtils"
-	"github.com/tigerbot/hyperdht/dhtRpc"
+	"github.com/tigerbot/hyperdht/cmd/internal/cmdutils"
+	"github.com/tigerbot/hyperdht/dhtrpc"
 )
 
 func normal(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT) {
 	defer wait.Done()
 	defer dht.Close()
-	cmdUtils.Bootstrap(ctx, dht)
+	cmdutils.Bootstrap(ctx, dht)
 }
 func announce(ctx context.Context, wait *sync.WaitGroup, dht *hyperdht.HyperDHT) {
 	defer dht.Close()
 	key := sha256.Sum256(dht.ID())
-	cmdUtils.Announce(ctx, wait, dht, key[:])
+	cmdutils.Announce(ctx, wait, dht, key[:])
 }
 
 func main() {
@@ -37,16 +37,16 @@ func main() {
 	pflag.BoolVarP(&verbose, "verbose", "v", false, "print the periodic messages about bootstrapping and announcing")
 	pflag.Parse()
 
-	cmdUtils.Verbose = verbose
-	dhtCfg := dhtRpc.Config{
-		BootStrap: cmdUtils.ParseAddrs(bootstrap),
+	cmdutils.Verbose = verbose
+	dhtCfg := dhtrpc.Config{
+		BootStrap: cmdutils.ParseAddrs(bootstrap),
 	}
 	h := normal
 	if active {
 		h = announce
 	}
 
-	ctx := cmdUtils.InterruptCtx()
+	ctx := cmdutils.InterruptCtx()
 	var wait sync.WaitGroup
 	wait.Add(count)
 	for i := 0; i < count; i++ {

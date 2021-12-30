@@ -20,7 +20,7 @@ func TestJSONParsing(t *testing.T) {
 		"other.example.com:12345"
 	]
 }`
-	ioutil.WriteFile(filename, []byte(content), 0600)
+	ioutil.WriteFile(filename, []byte(content), 0o600) //nolint:errcheck
 
 	var cfg config
 	if err := cfg.Set(filename); err != nil {
@@ -53,7 +53,7 @@ port: 49737
 bootstrap:
   - dht1.daplie.com
   - other.example.com:12345`
-	ioutil.WriteFile(filename, []byte(content), 0600)
+	ioutil.WriteFile(filename, []byte(content), 0o600) //nolint:errcheck
 
 	var cfg config
 	if err := cfg.Set(filename); err != nil {
