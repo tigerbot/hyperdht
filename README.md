@@ -1,9 +1,8 @@
 # hyperdht
 
-[![GoDoc](https://godoc.org/github.com/tigerbot/hyperdht?status.svg)](https://godoc.org/github.com/tigerbot/hyperdht)
+[![GoDoc](https://pkg.go.dev/github.com/tigerbot/hyperdht?status.svg)](https://pkg.go.dev/github.com/tigerbot/hyperdht)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tigerbot/hyperdht)](https://goreportcard.com/report/github.com/tigerbot/hyperdht)
-[![Build Status](https://github.com/tigerbot/hyperdht/badges/master/build.svg)](https://github.com/tigerbot/hyperdht/commits/master)
-[![Coverage Report](https://github.com/tigerbot/hyperdht/badges/master/coverage.svg)](https://github.com/tigerbot/hyperdht/commits/master)
+[![Coverage Report](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/tigerbot/6bd844b2511962860bc946858f5078e0/raw/hyperdht__heads_main.json)](https://github.com/tigerbot/hyperdht/commits/master)
 
 Hyperdht is a golang implementation of a Kademlia based DHT that supports peer
 discovery and distributed hole punching. It uses a DHT that can make RPC calls
@@ -17,6 +16,9 @@ as a STUN server to establish a connection.
 Implementation is based on and intended to work with
 [mafintosh's `hyperdht` written for nodejs](https://github.com/mafintosh/hyperdht).
 It is built on the following packages also contained in this repository.
+
+This is an old project from an old job that I resurrected mostly to see if
+generics helped with the kbucket as much as I remembered thinking it would.
 
 ## kbucket
 

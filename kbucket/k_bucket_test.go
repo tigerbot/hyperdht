@@ -24,20 +24,20 @@ type advancedContact struct {
 func (c *advancedContact) ID() []byte { return c.id }
 
 func TestAdd(t *testing.T) {
-	bucket := New(nil)
+	bucket := New[*testContact](nil)
 
 	a := &testContact{'a'}
 	bucket.Add(a)
 	if len(bucket.root.contacts) != 1 {
 		t.Fatalf("root node doesn't contain added contact: %v", bucket.root)
-	} else if !reflect.DeepEqual(bucket.root.contacts, []Contact{a}) {
+	} else if !reflect.DeepEqual(bucket.root.contacts, []*testContact{a}) {
 		t.Fatal("root node contains wrong contact")
 	}
 
 	bucket.Add(a.copy())
 	if len(bucket.root.contacts) != 1 {
 		t.Fatalf("root node duplicated contact with same ID: %v", bucket.root)
-	} else if !reflect.DeepEqual(bucket.root.contacts, []Contact{a}) {
+	} else if !reflect.DeepEqual(bucket.root.contacts, []*testContact{a}) {
 		t.Fatal("root node contains wrong contact after re-add")
 	}
 
@@ -45,45 +45,45 @@ func TestAdd(t *testing.T) {
 	bucket.Add(b)
 	if len(bucket.root.contacts) != 2 {
 		t.Fatalf("root node doesn't contain second contact: %v", bucket.root)
-	} else if !reflect.DeepEqual(bucket.root.contacts, []Contact{a, b}) {
+	} else if !reflect.DeepEqual(bucket.root.contacts, []*testContact{a, b}) {
 		t.Fatal("root node contains wrong contacts with second contact")
 	}
 
 	bucket.Add(a)
-	if !reflect.DeepEqual(bucket.root.contacts, []Contact{b, a}) {
+	if !reflect.DeepEqual(bucket.root.contacts, []*testContact{b, a}) {
 		t.Fatal("root node contains wrong contact order after update")
 	}
 }
 
 func TestArbiter(t *testing.T) {
-	bucket := New(nil)
+	bucket := New[*advancedContact](nil)
 
 	a1 := &advancedContact{id: []byte{'a'}, msg: "this is the first a"}
 	a2 := &advancedContact{id: []byte{'a'}, msg: "this is the second a"}
 	a3 := &advancedContact{id: []byte{'a'}, msg: "this won't ever be added"}
 
-	bucket.Arbiter(func(a, b Contact) Contact { return a })
+	bucket.Arbiter(func(a, b *advancedContact) *advancedContact { return a })
 	bucket.Add(a1)
 	bucket.Add(a2)
-	if !reflect.DeepEqual(bucket.root.contacts, []Contact{a1}) {
+	if !reflect.DeepEqual(bucket.root.contacts, []*advancedContact{a1}) {
 		t.Fatal("root node contains wrong contact after second add")
 	}
 
 	bucket.Arbiter(nil)
 	bucket.Add(a2)
-	if !reflect.DeepEqual(bucket.root.contacts, []Contact{a2}) {
+	if !reflect.DeepEqual(bucket.root.contacts, []*advancedContact{a2}) {
 		t.Fatal("root node contains wrong contact after third add")
 	}
 
-	bucket.Arbiter(func(_, _ Contact) Contact { return a3 })
+	bucket.Arbiter(func(_, _ *advancedContact) *advancedContact { return a3 })
 	bucket.Add(a2)
-	if !reflect.DeepEqual(bucket.root.contacts, []Contact{a3}) {
+	if !reflect.DeepEqual(bucket.root.contacts, []*advancedContact{a3}) {
 		t.Fatal("root node contains wrong contact after fourth add")
 	}
 }
 
 func TestGet(t *testing.T) {
-	bucket := New(nil)
+	bucket := New[*testContact](nil)
 
 	if c := bucket.Get([]byte("foo")); c != nil {
 		t.Errorf("get on non-existent ID returned non-nil contact %v", c)
@@ -97,7 +97,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestRemove(t *testing.T) {
-	bucket := New(nil)
+	bucket := New[*testContact](nil)
 
 	bucket.Add(&testContact{'a'})
 	if len(bucket.root.contacts) != 1 {
@@ -123,7 +123,7 @@ func TestRemove(t *testing.T) {
 }
 
 func TestClosest(t *testing.T) {
-	bucket := New(&Config{LocalID: []byte{0, 0}})
+	bucket := New[*testContact](&Config[*testContact]{LocalID: []byte{0, 0}})
 	for i := byte(0); i < 0x12; i++ {
 		bucket.Add(&testContact{i})
 	}
@@ -169,7 +169,7 @@ func TestClosest(t *testing.T) {
 }
 
 func TestClosestAll(t *testing.T) {
-	bucket := New(&Config{LocalID: []byte{0, 0}})
+	bucket := New[*testContact](&Config[*testContact]{LocalID: []byte{0, 0}})
 	for i := 0; i < 1e3; i++ {
 		bucket.Add(&testContact{byte(i / 256), byte(i % 256)})
 	}
@@ -188,7 +188,7 @@ func TestClosestAll(t *testing.T) {
 }
 
 func TestCount(t *testing.T) {
-	bucket := New(nil)
+	bucket := New[*testContact](nil)
 
 	if cnt := bucket.Count(); cnt != 0 {
 		t.Fatalf("fresh bucket has count %d, expected 0", cnt)
@@ -218,7 +218,7 @@ func TestCount(t *testing.T) {
 }
 
 func TestLargeBucket(t *testing.T) {
-	bucket := New(&Config{LocalID: []byte{0x55, 0x55}})
+	bucket := New[*testContact](&Config[*testContact]{LocalID: []byte{0x55, 0x55}})
 	for i := byte(0); i < DefaultBucketSize; i++ {
 		bucket.Add(&testContact{0x80, i})
 		bucket.Add(&testContact{0x00, i})

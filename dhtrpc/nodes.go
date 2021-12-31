@@ -13,8 +13,7 @@ import (
 type Node = ipencoding.Node
 
 var (
-	_, _, _ Node            = new(basicNode), new(storedNode), new(queryNode)
-	_       kbucket.Contact = new(storedNode)
+	_, _, _ Node = new(basicNode), new(storedNode), new(queryNode)
 )
 
 type basicNode struct {
@@ -38,13 +37,13 @@ type storedNode struct {
 type storedNodeList struct {
 	lock sync.Mutex
 
-	*kbucket.KBucket
+	*kbucket.KBucket[*storedNode]
 	top    *storedNode
 	bottom *storedNode
 }
 
-func (l *storedNodeList) init(id []byte, onPing kbucket.FuncPing) {
-	l.KBucket = kbucket.New(&kbucket.Config{
+func (l *storedNodeList) init(id []byte, onPing kbucket.FuncPing[*storedNode]) {
+	l.KBucket = kbucket.New[*storedNode](&kbucket.Config[*storedNode]{
 		LocalID: id,
 		OnPing:  onPing,
 
@@ -65,15 +64,7 @@ func (l *storedNodeList) oldest(cnt int) []*storedNode {
 	return list
 }
 
-func (l *storedNodeList) addToLinkedList(c kbucket.Contact) {
-	n, ok := c.(*storedNode)
-	if !ok {
-		// This must be in a separate go-routine because we still hold the KBucket lock, and
-		// calling the Remove function will try to acquire it again, resulting in deadlock.
-		go l.Remove(c.ID())
-		return
-	}
-
+func (l *storedNodeList) addToLinkedList(n *storedNode) {
 	if l.top == nil && l.bottom == nil {
 		l.top, l.bottom = n, n
 		n.prev, n.next = nil, nil
@@ -83,12 +74,7 @@ func (l *storedNodeList) addToLinkedList(c kbucket.Contact) {
 		l.top = n
 	}
 }
-func (l *storedNodeList) removeFromLinkedList(c kbucket.Contact) {
-	n, ok := c.(*storedNode)
-	if !ok {
-		return
-	}
-
+func (l *storedNodeList) removeFromLinkedList(n *storedNode) {
 	if l.bottom != n && l.top != n {
 		n.prev.next = n.next
 		n.next.prev = n.prev
@@ -109,17 +95,17 @@ func (l *storedNodeList) removeFromLinkedList(c kbucket.Contact) {
 	n.next, n.prev = nil, nil
 }
 
-func (l *storedNodeList) onNodeAdd(c kbucket.Contact) {
+func (l *storedNodeList) onNodeAdd(c *storedNode) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	l.addToLinkedList(c)
 }
-func (l *storedNodeList) onNodeRemove(c kbucket.Contact) {
+func (l *storedNodeList) onNodeRemove(c *storedNode) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	l.removeFromLinkedList(c)
 }
-func (l *storedNodeList) onNodeUpdate(old, fresh kbucket.Contact) {
+func (l *storedNodeList) onNodeUpdate(old, fresh *storedNode) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 

@@ -61,24 +61,20 @@ func TestStoredNodeListOrder(t *testing.T) {
 		}
 	}
 
-	toAdd := [][]byte{{0x5a, 0xa5}, {0xa5, 0x5a}, {0x00, 0x00}, {0xff, 0xff}, {0xa1, 0xb2}}
+	toAdd := [][]byte{{0x5a, 0xa5}, {0xa5, 0x5a}, {0xff, 0xff}, {0xa1, 0xb2}}
 	for _, id := range toAdd {
 		l.Add(&storedNode{basicNode: basicNode{id: id}})
 	}
-	check(toAdd[:3])
-
-	// Adding a node that isn't a *storedNode should result in that ID being removed.
-	l.Add(&basicNode{id: toAdd[2]})
-	check([][]byte{toAdd[0], toAdd[1], toAdd[3]})
+	check(toAdd[:2])
 
 	// Adding a node already in the list should move it to the newest part of the list
 	l.Add(&storedNode{basicNode: basicNode{id: toAdd[1]}})
-	check([][]byte{toAdd[0], toAdd[3], toAdd[4], toAdd[1]})
+	check([][]byte{toAdd[0], toAdd[2], toAdd[3], toAdd[1]})
 	l.Add(&storedNode{basicNode: basicNode{id: toAdd[0]}})
-	check([][]byte{toAdd[3], toAdd[4], toAdd[1], toAdd[0]})
+	check([][]byte{toAdd[2], toAdd[3], toAdd[1], toAdd[0]})
 
 	l.Remove(toAdd[0])
-	check([][]byte{toAdd[3], toAdd[4], toAdd[1]})
+	check([][]byte{toAdd[2], toAdd[3], toAdd[1]})
 	if old := l.oldest(10); len(old) != 3 {
 		t.Errorf("list after remove had %d items, expected 3\n\t%#v", len(old), old)
 	}

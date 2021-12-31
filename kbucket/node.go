@@ -6,18 +6,19 @@ import (
 
 // The Contact interface represents any type that can be stored in the K-Bucket.
 type Contact interface {
+	comparable
 	ID() []byte
 }
 
-type bucketNode struct {
-	contacts  []Contact
+type bucketNode[C Contact] struct {
+	contacts  []C
 	dontSplit bool
 	bitIndex  int
-	left      *bucketNode
-	right     *bucketNode
+	left      *bucketNode[C]
+	right     *bucketNode[C]
 }
 
-func (n *bucketNode) indexOf(id []byte) int {
+func (n *bucketNode[C]) indexOf(id []byte) int {
 	for i, c := range n.contacts {
 		if bytes.Equal(c.ID(), id) {
 			return i
@@ -27,22 +28,23 @@ func (n *bucketNode) indexOf(id []byte) int {
 	return -1
 }
 
-func (n *bucketNode) size() int {
+func (n *bucketNode[C]) size() int {
 	return len(n.contacts)
 }
-func (n *bucketNode) addContact(c Contact) {
+func (n *bucketNode[C]) addContact(c C) {
 	n.contacts = append(n.contacts, c)
 }
-func (n *bucketNode) getContact(id []byte) Contact {
+func (n *bucketNode[C]) getContact(id []byte) C {
 	for _, c := range n.contacts {
 		if bytes.Equal(c.ID(), id) {
 			return c
 		}
 	}
 
-	return nil
+	var zero C
+	return zero
 }
-func (n *bucketNode) removeContact(id []byte) Contact {
+func (n *bucketNode[C]) removeContact(id []byte) C {
 	for i, c := range n.contacts {
 		if bytes.Equal(c.ID(), id) {
 			n.contacts = append(n.contacts[:i], n.contacts[i+1:]...)
@@ -50,19 +52,20 @@ func (n *bucketNode) removeContact(id []byte) Contact {
 		}
 	}
 
-	return nil
+	var zero C
+	return zero
 }
-func (n *bucketNode) removeIndex(i int) Contact {
+func (n *bucketNode[C]) removeIndex(i int) C {
 	c := n.contacts[i]
 	n.contacts = append(n.contacts[:i], n.contacts[i+1:]...)
 	return c
 }
 
-func createNode(bitIndex int) *bucketNode {
-	return &bucketNode{contacts: []Contact{}, bitIndex: bitIndex}
+func createNode[C Contact](bitIndex int) *bucketNode[C] {
+	return &bucketNode[C]{contacts: []C{}, bitIndex: bitIndex}
 }
 
-func findNode(node *bucketNode, id []byte) *bucketNode {
+func findNode[C Contact](node *bucketNode[C], id []byte) *bucketNode[C] {
 	for node.contacts == nil {
 		// First determine the relevant byte index and create a mask that will extract the correct
 		// bit from the relevant byte. Remember that index 0 refers to the most significant bit
@@ -79,20 +82,20 @@ func findNode(node *bucketNode, id []byte) *bucketNode {
 	return node
 }
 
-func splitNode(node *bucketNode, localID []byte) {
+func splitNode[C Contact](node *bucketNode[C], localID []byte) {
 	// First convert this node from a leave node into an inner tree node, making sure to save
 	// the contacts to be redistributed to the new children leaves.
-	var contacts []Contact
+	var contacts []C
 	contacts, node.contacts = node.contacts, nil
-	node.left, node.right = createNode(node.bitIndex+1), createNode(node.bitIndex+1)
+	node.left, node.right = createNode[C](node.bitIndex+1), createNode[C](node.bitIndex+1)
 
 	for _, c := range contacts {
-		findNode(node, c.ID()).addContact(c)
+		findNode[C](node, c.ID()).addContact(c)
 	}
 
 	// Determine which node the local ID would be placed in so we can mark the other one
 	// to not be split.
-	if localNode := findNode(node, localID); localNode == node.left {
+	if localNode := findNode[C](node, localID); localNode == node.left {
 		node.right.dontSplit = true
 	} else {
 		node.left.dontSplit = true

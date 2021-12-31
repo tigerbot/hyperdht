@@ -33,11 +33,11 @@ func (d XORDistance) Closer(a, b []byte) bool {
 	return (al-dl)*(al-dl) < (bl-dl)*(bl-dl)
 }
 
-type distSorter struct {
-	list []Contact
+type distSorter[C Contact] struct {
+	list []C
 	cmp  DistanceCmp
 }
 
-func (s distSorter) Len() int           { return len(s.list) }
-func (s distSorter) Swap(i, j int)      { s.list[i], s.list[j] = s.list[j], s.list[i] }
-func (s distSorter) Less(i, j int) bool { return s.cmp.Closer(s.list[i].ID(), s.list[j].ID()) }
+func (s distSorter[C]) Len() int           { return len(s.list) }
+func (s distSorter[C]) Swap(i, j int)      { s.list[i], s.list[j] = s.list[j], s.list[i] }
+func (s distSorter[C]) Less(i, j int) bool { return s.cmp.Closer(s.list[i].ID(), s.list[j].ID()) }

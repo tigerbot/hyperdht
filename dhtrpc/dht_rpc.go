@@ -102,9 +102,7 @@ func (d *DHT) Nodes() []Node {
 	stored := d.nodes.Contacts()
 	result := make([]Node, 0, len(stored))
 	for _, c := range stored {
-		if n, ok := c.(Node); ok {
-			result = append(result, n)
-		}
+		result = append(result, c)
 	}
 	return result
 }
@@ -112,9 +110,7 @@ func (d *DHT) closest(target []byte, count int) []Node {
 	contacts := d.nodes.Closest(kbucket.XORDistance(target), count)
 	nodes := make([]Node, 0, len(contacts))
 	for _, c := range contacts {
-		if n, ok := c.(Node); ok {
-			nodes = append(nodes, n)
-		}
+		nodes = append(nodes, c)
 	}
 	return nodes
 }
@@ -257,20 +253,12 @@ func (d *DHT) forwardResponse(peer *udprequest.PeerRequest, req *request) *udpre
 	return &cp
 }
 
-func (d *DHT) onNodePing(current []kbucket.Contact, replacement kbucket.Contact) {
-	if _, ok := replacement.(*storedNode); !ok {
-		return
-	}
+func (d *DHT) onNodePing(current []*storedNode, replacement *storedNode) {
 	curTick := atomic.LoadUint64(&d.tick)
 	reping := make([]*storedNode, 0, len(current))
 
-	for _, c := range current {
-		// The k-bucket shouldn't ever have the wrong type, but handle it just in case
-		if node, ok := c.(*storedNode); !ok {
-			d.nodes.Remove(c.ID())
-			d.nodes.Add(replacement)
-			return
-		} else if curTick-node.tick >= bucketPingThresh {
+	for _, node := range current {
+		if curTick-node.tick >= bucketPingThresh {
 			// This node is older than the threshold for re-pinging triggered by the k-bucket,
 			// so make sure it's still active
 			reping = append(reping, node)

@@ -6,12 +6,12 @@ import (
 )
 
 func TestOnAdd(t *testing.T) {
-	bucket := New(&Config{LocalID: []byte{0, 0}})
+	bucket := New[*testContact](&Config[*testContact]{LocalID: []byte{0, 0}})
 	var wait sync.Mutex
 	wait.Lock()
 
 	added := &testContact{0x80, 0x00}
-	bucket.OnAdd(func(c Contact) {
+	bucket.OnAdd(func(c *testContact) {
 		if c != added {
 			t.Errorf("on add received %#v, expected %#v", c, added)
 		}
@@ -29,7 +29,7 @@ func TestOnAdd(t *testing.T) {
 	}
 
 	added = &testContact{0x80, 0x01}
-	bucket.OnAdd(func(c Contact) {
+	bucket.OnAdd(func(c *testContact) {
 		if c != added {
 			t.Errorf("on add received %#v, expected %#v", c, added)
 		}
@@ -44,13 +44,13 @@ func TestOnAdd(t *testing.T) {
 }
 
 func TestOnUpdate(t *testing.T) {
-	bucket := New(&Config{LocalID: []byte{0, 0}})
+	bucket := New[*testContact](&Config[*testContact]{LocalID: []byte{0, 0}})
 	var wait sync.Mutex
 	wait.Lock()
 
 	first := &testContact{0x80, 0x01}
 	second := &testContact{0x80, 0x01}
-	bucket.OnUpdate(func(prev, next Contact) {
+	bucket.OnUpdate(func(prev, next *testContact) {
 		if prev != first {
 			t.Errorf("on update received %#v for first argument, expected %#v", prev, first)
 		}
@@ -65,14 +65,14 @@ func TestOnUpdate(t *testing.T) {
 }
 
 func TestOnRemove(t *testing.T) {
-	bucket := New(&Config{LocalID: []byte{0, 0}})
+	bucket := New[*testContact](&Config[*testContact]{LocalID: []byte{0, 0}})
 	var wait sync.Mutex
 	wait.Lock()
 
 	added := &testContact{0x80, 0x00}
 	bucket.Add(added)
 
-	bucket.OnRemove(func(c Contact) {
+	bucket.OnRemove(func(c *testContact) {
 		if c != added {
 			t.Errorf("on remove received %#v, expected %#v", c, added)
 		}
@@ -83,11 +83,11 @@ func TestOnRemove(t *testing.T) {
 }
 
 func TestPing(t *testing.T) {
-	bucket := New(&Config{LocalID: []byte{0, 0}})
+	bucket := New[*testContact](&Config[*testContact]{LocalID: []byte{0, 0}})
 	var wait sync.Mutex
 	wait.Lock()
 
-	bucket.OnPing(func(current []Contact, replacement Contact) {
+	bucket.OnPing(func(current []*testContact, replacement *testContact) {
 		if len(current) != DefaultPingCount {
 			t.Errorf("got %d nodes to ping, expected %d", len(current), DefaultPingCount)
 		}

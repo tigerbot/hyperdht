@@ -1,6 +1,6 @@
 module github.com/tigerbot/hyperdht
 
-go 1.17
+go 1.18
 
 require (
 	github.com/anacrolix/utp v0.1.0
